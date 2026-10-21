@@ -1,0 +1,128 @@
+{#
+  判定规则与运行机制（全站统一说明块）
+  口径来源：core/regime.py（三态判据/强弱/滞回/毛刺/分级）+ core/scan.py（实测统计）
+           + core/autorun.py（盘后运行）+ core/notifier.py（播报）
+  这里只读现成参数与状态渲染，不另写一套规则，避免页面与引擎口径漂移。
+  用法：index.html 展开；detail/market 页先 {% set rules_mode = 'fold' %} 再 include。
+  注意：块内不使用 <table>/<colgroup>/<th>，防止打破各页面对表格结构的断言。
+  标记说明：RULES-BEGIN/END 之间是“规则披露区”，允许出现历史统计与区间定位用词；
+           测试的整页禁用词护栏只扫描这个区间之外的数据区（逐票行、推送文案）。
+#}
+{% set rgp = cfg.regime %}
+{% set rmode = rules_mode | default('open') %}
+<!--RULES-BEGIN-->
+{% macro rules_body() %}
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:0 22px;align-items:start">
+
+  <div>
+    <h3 style="font-size:14px;margin:6px 0 8px">一、三态判定（日线收盘，仅用均线 + ADX）</h3>
+    <div class="pgrid" style="grid-template-columns:1fr">
+      <div class="prow"><span><b>① <span class="tag rg-bull">多头</span></b>　收盘 &gt; MA20 且 MA20 &gt; MA{{ rgp.ma_slow }}
+          且 MA20 斜率 &gt; <b>+{{ rgp.slope_min }}%</b> 且 ADX(14) &gt; <b>{{ rgp.adx_min|int }}</b></span>
+        <span class="ptag">弱多头：价在 MA20 上方且斜率为正</span></div>
+      <div class="prow"><span><b>② <span class="tag rg-bear">空头</span></b>　收盘 &lt; MA20 且 MA20 &lt; MA{{ rgp.ma_slow }}
+          且 MA20 斜率 &lt; <b>−{{ rgp.slope_min }}%</b> 且 ADX(14) &gt; <b>{{ rgp.adx_min|int }}</b></span>
+        <span class="ptag">弱空头：价在 MA20 下方且斜率为负</span></div>
+      <div class="prow"><span><b>③ <span class="tag rg-range">震荡</span></b>　其余情况（价格反复穿越 MA20、斜率走平）</span>
+        <span class="ptag">{{ regime_desc.range }}</span></div>
+      <div class="prow"><span><b>④ 毛刺过滤</b>　状态持续不足 <b>{{ rgp.spike_days }} 日</b>的片段并入相邻主状态</span>
+        <span class="ptag">避免标注闪烁</span></div>
+      <div class="prow"><span><b>⑤ 滞回确认</b>　新状态需连续 <b>{{ rgp.confirm_days }} 个交易日</b>成立才切换</span>
+        <span class="ptag">没凑满 = 酝酿中 ⏳，不改今日口径</span></div>
+      <div class="prow"><span><b>⑥ 数据不足</b>　MA20 / 慢线 / 斜率任一项还没算出来</span>
+        <span class="ptag">{{ regime_desc.unknown }}</span></div>
+    </div>
+    <ul class="muted" style="margin:10px 0 0;padding-left:20px;line-height:1.8">
+      <li>中线固定 <b>MA20</b>（不开放修改），斜率口径 <code>(MA20[t]−MA20[t−5])/|MA20[t−5]|×100</code>；
+        快线 MA{{ rgp.ma_fast }} 只在图上做辅助参考，<b>不参与判定</b>。</li>
+      <li><b>强 / 弱两档</b>：四条全满足 = 强；只满足“收盘在 MA20 一侧 + 斜率同向” = 弱（三态不变，标签写作<b>弱多头 / 弱空头</b>）。</li>
+      <li><b>波段标注</b>：K 线背景色块 = 生效状态的连续段，<b>◆</b> = 趋势切换确认那天；段内涨跌取段首末收盘，高低取段内极值。</li>
+      <li><b>BOLL(20,2) 不参与三态判定</b>，只用于震荡段的区间定位：<code>%B = (收盘 − 下轨) / (上轨 − 下轨)</code>，
+        0 靠下轨、1 靠上轨；仪表盘与详情页的“区间位置”列就是它。<b>震荡做T的第一纪律：趋势段停手</b>
+        ——历史实证（7 只大盘股、2.1 年）：只在震荡段内 %B≤0.10 买 / %B≥0.90 卖、最长持 15 日、5% 止损，
+        27 笔胜率 70%、均净 +1.68%；同样的信号放在趋势段只有 52% 胜率、均净 +0.28%。
+        本工具已删除交易层，不再重跑这套账，上面数字是历史结论的引用，页面只提供 %B 定位。</li>
+    </ul>
+  </div>
+
+  <div>
+    <h3 style="font-size:14px;margin:6px 0 8px">二、切换分级（趋势切换的提醒优先级）</h3>
+    <div class="pgrid" style="grid-template-columns:1fr">
+      {% for x in (fstats.rows if fstats else []) %}
+      <div class="prow">
+        <span><b>{{ x.mark }} {{ x.prev_cn }} → {{ x.cur_cn }}</b>
+          <span class="muted">实测 {{ x.n }} 次 · 未来{{ fstats.horizon }}日 均净 {{ '%+.2f'|format(x.avg) }}% · 方向胜率 {{ '%.0f'|format(x.win_pct) }}%</span></span>
+        <span class="ptag">{{ '强信号' if x.grade == 'strong' else ('动能变化' if x.grade == 'momentum' else '其它') }}
+          {%- if x.ref_ret is not none %}　给定 {{ '%+.2f'|format(x.ref_ret) }}%{% if x.ref_win %} / 胜率{{ x.ref_win|int }}%{% endif %}{% endif %}</span>
+      </div>
+      {% endfor %}
+      {% if not fstats %}
+      {% for k, v in flip_ref.items() %}
+      <div class="prow"><span><b>{{ v.mark }} {{ '强信号' if v.grade == 'strong' else '动能变化' }}</b>
+          {{ regime_cn[k[0]] }} → {{ regime_cn[k[1]] }}</span>
+        <span class="ptag">给定 {{ '%+.2f'|format(v.ret) }}%{% if v.win %} / 胜率{{ v.win|int }}%{% endif %}</span></div>
+      {% endfor %}
+      <div class="prow"><span><b>⚪ 其它</b>　趋势直接互转按强信号处理，不附参考数字</span><span class="ptag">简报里随后列出</span></div>
+      {% endif %}
+    </div>
+    {% if fstats %}
+    <p class="muted" style="margin:8px 0 0">实测口径：{{ fstats.n_days }} 个交易日样本、{{ fstats.n_flips }} 次切换，
+      以<b>切换确认次日收盘</b>为起点、看未来 <b>{{ fstats.horizon }}</b> 个交易日；“给定”列是需求里带来的历史结论（7 只大盘股样本）。
+      同为历史统计，两者都<b>不构成收益承诺</b>。</p>
+    {% else %}
+    <p class="muted" style="margin:8px 0 0">上面“给定”是需求里带来的历史结论（7 只大盘股样本）；
+      本页不重算行情，<b>实测数字</b>见<a href="/">趋势仪表盘</a>与<a href="/market">行情波段页</a>（随参数一起变）。</p>
+    {% endif %}
+    <ul class="muted" style="margin:10px 0 0;padding-left:20px;line-height:1.8">
+      <li><b>🔴🔴 强信号｜震荡 → 趋势</b>：方向确立，简报里排在最前、单独成节。</li>
+      <li><b>🟡 动能变化｜趋势 → 震荡</b>：只是动能衰减、方向性弱，不作为方向提醒。</li>
+      <li>趋势直接互转（多 ↔ 空）按强信号处理；酝酿中（⏳）不算切换，只在简报里预告进度。</li>
+      <li>分级只作用在“提醒优先级”上，<b>不改变三态判定本身</b>，也不产生个股动作。</li>
+    </ul>
+
+    <h3 style="font-size:14px;margin:14px 0 8px">三、运行机制</h3>
+    <div class="pgrid" style="grid-template-columns:1fr">
+      <div class="prow"><span>盘后自动运行</span><span class="pv">{{ '已开启' if cfg.auto_run_enabled else '已关闭' }} · 每日 {{ cfg.auto_run_time }}</span></div>
+      <div class="prow"><span>定时线程</span><span class="pv">{{ '运行中' if autorun_st.alive else '未启动' }}</span></div>
+      <div class="prow"><span>上次运行</span><span class="pv">{{ autorun_st.last_run_at }} / {{ autorun_st.last_result }}</span></div>
+      <div class="prow"><span>推送通道</span><span class="pv">{{ notifier_desc }}</span></div>
+      <div class="prow"><span>数据起点</span><span class="pv">{{ cfg.data_start }}</span></div>
+    </div>
+    <ul class="muted" style="margin:10px 0 0;padding-left:20px;line-height:1.8">
+      <li><b>每个交易日盘后（{{ cfg.auto_run_time }}）自动重跑一次本识别</b>：更新数据 → 三态扫描 → 飞书简报，
+        更新当前趋势与行情；同一自然日只跑一次。</li>
+      <li><b>交易日保护</b>：最新数据日期不等于当天（节假日、数据源滞后）就跳过推送；是否重试由设置页开关决定。</li>
+      <li><b>若发生趋势切换</b>，按上面的分级推送：<b>🔴🔴 强信号</b>单独成节排在最前，<b>🟡 动能变化</b>随后，
+        ⏳ 酝酿中只报进度。</li>
+      <li><b>简报固定内容</b>：趋势计数（含强趋势只数）→ 逐只（收盘 / 涨跌幅 / 三态强弱 / 本波段起始日与第几日 /
+        MA20 与慢线与斜率 / ADX，震荡段附加 %B）→ 分级切换 → 酝酿中 → 未纳入判定。</li>
+      <li><b>手动入口</b>：本页“更新数据并重新扫描 / 发送飞书播报 / 立即运行一次”，dry 预览只生成文本不发送。</li>
+      <li><b>参数生效范围</b>：<a href="/settings">设置页</a>保存即全局生效并落盘 <code>config.yaml</code>；
+        <a href="/market">行情波段页</a>现场填的参数只影响本次查询，不落盘。实测分级统计随参数一起变。</li>
+      <li><b>数据与排查</b>：日线来自新浪接口（前复权，失败时退化为不复权），本地缓存并增量更新；
+        日志 <code>autorun.log</code>，最近状态 <code>data/autorun_state.json</code>，自动运行需保持服务在跑（<code>run.sh</code>）。</li>
+    </ul>
+  </div>
+</div>
+<p class="muted" style="margin:12px 0 0;border-top:1px dashed var(--line);padding-top:8px">
+  <b>边界</b>：本工具只做行情识别 —— 不给个股点位与仓位建议、不做收益承诺、不对接任何交易接口；
+  上面所有统计都是历史行情的描述。ADX / RSI / 带宽 / 振幅 / 量能 / %B 只是盘面参考。
+  权威原文见 <a href="/doc">需求文档</a>（第 2、3 节）。
+</p>
+{% endmacro %}
+
+{% if rmode == 'fold' %}
+<div class="card">
+  <details class="more">
+    <summary style="font-size:14px;font-weight:600;color:var(--txt)">判定规则与运行机制（点开）</summary>
+    {{ rules_body() }}
+  </details>
+</div>
+{% else %}
+<div class="card" id="rules">
+  <h2>判定规则与运行机制
+    <span class="muted">（当前生效参数：MA20 × MA{{ rgp.ma_slow }} ±{{ rgp.slope_min }}% · ADX&gt;{{ rgp.adx_min|int }} · 滞回{{ rgp.confirm_days }}日 · 毛刺{{ rgp.spike_days }}日）</span></h2>
+  {{ rules_body() }}
+</div>
+{% endif %}
+<!--RULES-END-->

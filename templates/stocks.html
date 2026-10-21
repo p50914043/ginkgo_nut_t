@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% set active = 'stocks' %}
+{% block body %}
+<div class="card">
+  <h2>添加股票 <span class="muted">（趋势识别只需要代码与名称，其余信息自动从行情源取）</span></h2>
+  <form method="post" class="inline">
+    <input type="hidden" name="action" value="add">
+    <input name="code" placeholder="代码 如 600519 / sh.600519" required style="width:200px">
+    <input name="name" placeholder="名称（留空自动获取）" style="width:160px">
+    <button class="btn pri">添加</button>
+  </form>
+  <p class="muted" style="margin-top:8px">添加后第二天盘后扫描（以及<a href="/">仪表盘</a>、<a href="/market">行情波段页</a>、飞书播报）就会把它纳入判定；日线不足 60 根时先标为“数据不足”，不参与三态统计。</p>
+</div>
+
+<div class="card">
+  <h2>股票清单（{{ stocks|length }} 只）</h2>
+  <div class="tblwrap">
+  <table class="fit">
+    <colgroup><col style="width:12%"><col style="width:24%"><col style="width:20%"><col style="width:22%"><col style="width:22%"></colgroup>
+    <tr><th>代码</th><th>当前名称</th><th>改名</th><th>删除</th><th>入口</th></tr>
+    {% for s in stocks %}
+    <tr>
+      <td class="nw">{{ s.code }}</td>
+      <td>{{ s['name'] }}</td>
+      <td>
+        <form method="post" class="inline" style="margin:0">
+          <input type="hidden" name="action" value="rename">
+          <input type="hidden" name="code" value="{{ s.code }}">
+          <input name="name" value="{{ s['name'] }}" style="width:140px">
+          <button class="btn">保存名称</button></form>
+      </td>
+      <td>
+        <form method="post" class="inline" style="margin:0">
+          <input type="hidden" name="action" value="del">
+          <input type="hidden" name="code" value="{{ s.code }}">
+          <button class="btn" onclick="return confirm('删除 {{ s.name }}?')">删除</button></form>
+      </td>
+      <td><a href="/stock/{{ s.code }}" style="color:var(--blue);text-decoration:none">日K与波段详情</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  <p class="muted">交易相关的字段（底仓股数/成本、档位、单独票数门槛）已随交易层一起删除：本工具只识别行情，不再需要这些输入，清单也只保存代码与名称。</p>
+</div>
+{% endblock %}

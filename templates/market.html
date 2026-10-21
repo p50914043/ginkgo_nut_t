@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% set active = 'market' %}
+{% block body %}
+<div class="card">
+  <h2>行情波段 <span class="muted">（在历史日K上标出均线三态波段与趋势切换点 · 只做行情识别，不算收益）</span></h2>
+  <form method="post">
+    <div class="inline" style="row-gap:8px">
+      <label>开始<input name="start" type="date" value="{{ start }}"></label>
+      <label>结束<input name="end" type="date" value="{{ end }}"></label>
+      <label><input type="checkbox" name="refresh_data" value="on" {% if form.get('refresh_data')=='on' %}checked{% endif %}>先更新行情</label>
+      <button class="btn pri">生成波段图</button>
+    </div>
+
+    <div class="pgroup" style="margin-top:12px">
+      <h3>三态判定参数 <span class="muted">（只影响这段历史怎么切波段，留空则用设置页的值）</span></h3>
+      <div class="inline" style="row-gap:8px">
+        <label title="{{ ph.get('ma_fast') }}">快线MA<input name="ma_fast" style="width:60px" value="{{ form.get('ma_fast','') }}" placeholder="{{ rg.ma_fast }}"></label>
+        <label title="{{ ph.get('ma_slow') }}">慢线MA<input name="ma_slow" style="width:60px" value="{{ form.get('ma_slow','') }}" placeholder="{{ rg.ma_slow }}"></label>
+        <label title="{{ ph.get('slope_min') }}">MA20斜率阈值%<input name="slope_min" style="width:60px" value="{{ form.get('slope_min','') }}" placeholder="{{ rg.slope_min }}"></label>
+        <label title="{{ ph.get('adx_min') }}">ADX强档门槛<input name="adx_min" style="width:60px" value="{{ form.get('adx_min','') }}" placeholder="{{ rg.adx_min }}"></label>
+        <label title="{{ ph.get('confirm_days') }}">连续确认日<input name="confirm_days" style="width:50px" value="{{ form.get('confirm_days','') }}" placeholder="{{ rg.confirm_days }}"></label>
+        <label title="{{ ph.get('spike_days') }}">毛刺过滤日<input name="spike_days" style="width:50px" value="{{ form.get('spike_days','') }}" placeholder="{{ rg.spike_days }}"></label>
+        <span class="muted">收盘 &gt; MA20 且 MA20 &gt; MA{{ rg.ma_slow }} 且斜率 &gt; +{{ rg.slope_min }}% 且 ADX &gt; {{ rg.adx_min|int }} → 多头；完全反向 → 空头；其余 → 震荡（四条不全则标“弱”）</span>
+      </div>
+    </div>
+
+    <div style="margin-top:10px">
+      <b>标的</b> <span class="muted">（不选=全部）</span>
+      <a href="javascript:void(0)" onclick="toggleAll(true)">全选</a> /
+      <a href="javascript:void(0)" onclick="toggleAll(false)">清空</a>
+      <div class="stockpick">
+        {% for s in stocks %}
+        <label><input type="checkbox" name="codes" value="{{ s.code }}"
+          {% if s.code in sel_codes %}checked{% endif %}>
+          {{ s.name }} <span class="muted">{{ s.code }}</span></label>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="muted" style="margin-top:8px">默认读本地缓存（秒级返回），勾选“先更新行情”才会增量拉取最新日线。每只票最多画 400 根日线，超出部分只统计不画。</div>
+  </form>
+</div>
+
+{% if stats %}
+<div class="card">
+  <h2>区间三态构成 <span class="muted">（{{ start }} ~ {{ end }},共 {{ stats.total }} 个“标的×交易日”）</span></h2>
+  <div class="kpis">
+    <div class="kpi"><div class="v pos">{{ stats.bull }}</div><div class="k">多头天</div></div>
+    <div class="kpi"><div class="v neg">{{ stats.bear }}</div><div class="k">空头天</div></div>
+    <div class="kpi"><div class="v">{{ stats.range }}</div><div class="k">震荡天</div></div>
+    <div class="kpi"><div class="v">{{ stats.unknown }}</div><div class="k">均线未就绪天</div></div>
+    <div class="kpi"><div class="v">{{ stats.trend_pct|num('%.1f') }}%</div><div class="k">趋势占比（多+空）</div></div>
+    <div class="kpi"><div class="v">{{ stats.range_pct|num('%.1f') }}%</div><div class="k">震荡占比</div></div>
+    <div class="kpi"><div class="v">{{ stats.strong }}</div><div class="k">强档天（四条全满足，{{ stats.strong_pct|num('%.1f') }}%）</div></div>
+  </div>
+  <table class="fit">
+    <colgroup><col style="width:18%"><col style="width:9%"><col style="width:8%"><col style="width:8%">
+      <col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:10%"><col style="width:10%"><col style="width:8%"><col style="width:7%"></colgroup>
+    <tr><th>股票</th><th>交易日</th><th>多头天</th><th>空头天</th><th>震荡天</th><th>未就绪</th><th>强档天</th>
+        <th>趋势占比</th><th>震荡占比</th><th>强档占比</th><th>波段数</th></tr>
+    {% for r in stats.per_stock %}
+    <tr><td>{{ r.name }} <span class="muted">{{ r.code }}</span></td>
+      <td class="num">{{ r.bars }}</td>
+      <td class="num pos">{{ r.bull }}</td><td class="num neg">{{ r.bear }}</td>
+      <td class="num">{{ r.range }}</td><td class="num muted">{{ r.unknown }}</td>
+      <td class="num">{{ r.strong }}</td>
+      <td class="num">{{ r.trend_pct|num('%.1f') }}%</td>
+      <td class="num">{{ r.range_pct|num('%.1f') }}%</td>
+      <td class="num">{{ r.strong_pct|num('%.1f') }}%</td>
+      <td class="num">{{ r.n_segments }}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="muted">“波段数”是区间内合并出的同状态连续段数（不足 {{ rg.spike_days }} 日的毛刺已并入相邻主状态）：段数越多说明状态切换越频繁，段数少而天数长说明趋势更连贯。“强档天”是四条判据全满足的天数，其余同态日只算弱多/弱空。</p>
+</div>
+
+<div class="card">
+  <h2>波段性格统计 <span class="muted">（区间内 {{ stats.segments|length }} 段按状态汇总）</span></h2>
+  <table class="fit">
+    <colgroup><col style="width:11%"><col style="width:22%"><col style="width:9%"><col style="width:10%"><col style="width:10%">
+      <col style="width:10%"><col style="width:11%"><col style="width:9%"><col style="width:9%"></colgroup>
+    <tr><th>三态</th><th>含义</th><th>段数</th><th>合计天数</th><th>平均天数</th><th>段内强日</th>
+        <th>平均段内涨跌</th><th>最好一段</th><th>最差一段</th></tr>
+    {% for a in stats.stats %}
+    <tr><td><span class="tag {{ {'bull':'rg-bull','bear':'rg-bear','range':'rg-range'}.get(a.kind,'bad') }}">{{ a.label_cn }}</span></td>
+      <td class="muted">{{ regime_desc.get(a.kind, '') }}</td>
+      <td class="num">{{ a.n }}</td><td class="num">{{ a.days }}</td>
+      <td class="num">{{ a.avg_days|num('%.1f') }}</td>
+      <td class="num">{{ a.strong_days }}<span class="muted">({{ a.strong_pct|num('%.0f') }}%)</span></td>
+      <td class="num {{ 'pos' if a.avg_chg>=0 else 'neg' }}">{{ a.avg_chg|num('%+.2f') }}%</td>
+      <td class="num pos">{{ a.best|num('%+.2f') }}%</td>
+      <td class="num neg">{{ a.worst|num('%+.2f') }}%</td></tr>
+    {% endfor %}
+  </table>
+  <p class="muted">这里的“段内涨跌”只是从波段首日收盘到末日收盘的价格变化，<b>不是收益</b>：本工具不假设任何持仓与买卖时点。“段内强日”是该态里四条判据全满足的天数与占比。</p>
+</div>
+{% endif %}
+
+{% if charts %}
+<div class="card">
+  <h2>日K · 三态波段与趋势切换点</h2>
+  <p class="muted">背景色块 = 均线 + ADX 判定的三态波段（<span class="rb">多头·红</span> <span class="rg2">空头·绿</span> <span class="gr">震荡·灰</span>）；
+    <b>◆</b> 标在趋势变化的那天，悬停可看分级与“旧态 → 新态”；副图为量能 / ADX（虚线为强档门槛 {{ rg.adx_min|int }}）/ MACD。悬停任意一天可看当日指标与“本波段第几天”。</p>
+  {% for c in charts %}
+  <div class="kwrap">
+    <div class="khead">{{ c.name }} <span class="muted">{{ c.code }}</span>
+      <span class="muted">· 画了 {{ c.bars }} 根 · {{ c.n_segments }} 个波段（{{ c.n_flips }} 次趋势切换，其中 🔴🔴 强信号 {{ c.n_strong_flips }} 次）
+        · 多头 {{ c.n_bull }} / 空头 {{ c.n_bear }} / 震荡 {{ c.n_range }} / 未就绪 {{ c.n_unknown }} 天 · 强档 {{ c.n_strong }} 天</span>
+      <a class="btn" style="float:right" href="/stock/{{ c.code }}">看详情</a></div>
+    <div class="kchart4" id="k-{{ c.code }}"></div>
+  </div>
+  {% endfor %}
+  {% if charts|length < (stocks|length) %}
+  <p class="muted">图表最多显示 9 只标的，区间统计与波段明细见上表与下方列表。</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if stats %}
+<div class="card">
+  <h2>波段明细 <span class="muted">（按代码+起始日排序，最多列出 200 段）</span></h2>
+  <div class="tblwrap">
+  <table class="fit">
+    <colgroup><col style="width:13%"><col style="width:9%"><col style="width:9%"><col style="width:10%">
+      <col style="width:10%"><col style="width:6%"><col style="width:8%"><col style="width:10%"><col style="width:13%"><col style="width:12%"></colgroup>
+    <tr><th>股票</th><th>三态</th><th>起</th><th>止</th><th>天数</th><th>强日</th><th>段内涨跌</th>
+        <th>段内最高/最低</th><th>含义</th><th>备注</th></tr>
+    {% for s in stats.segments[:200] %}
+    <tr><td>{{ s.name }} <span class="muted">{{ s.code }}</span></td>
+      <td><span class="tag {{ {'bull':'rg-bull','bear':'rg-bear','range':'rg-range'}.get(s.kind,'bad') }}">{{ s.level_cn or s.label_cn }}</span></td>
+      <td class="nw">{{ s.start }}</td><td class="nw">{{ s.end }}</td>
+      <td class="num">{{ s.days }}</td>
+      <td class="num">{{ s.n_strong }}</td>
+      <td class="num {{ 'pos' if s.chg_pct>=0 else 'neg' }}">{{ s.chg_pct|num('%+.2f') }}%</td>
+      <td class="muted num">{{ s.hi|num }} / {{ s.lo|num }}</td>
+      <td class="muted">{{ s.desc }}</td>
+      <td class="muted">{% if s.current %}<b>区间末仍在这一段</b>{% else %}已切换{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% set rules_mode = 'fold' %}
+{% include '_rules.html' %}
+
+{% if charts %}
+<script id="mkt-data" type="application/json">{"charts": {{ charts|tojson }}}</script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script src="{{ url_for('static', filename='kline.js') }}"></script>
+<script>
+function toggleAll(v) {
+  document.querySelectorAll('input[name="codes"]').forEach(function (el) { el.checked = v; });
+}
+if (window.echarts) { renderKCharts('mkt-data', 'charts'); }
+</script>
+{% else %}
+<script>
+function toggleAll(v) {
+  document.querySelectorAll('input[name="codes"]').forEach(function (el) { el.checked = v; });
+}
+</script>
+{% endif %}
+{% endblock %}

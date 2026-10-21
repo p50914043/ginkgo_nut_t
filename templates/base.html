@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>日线趋势识别工具 · 多头 / 空头 / 震荡</title>
+<style>
+:root{--bg:#f4f6fa;--card:#fff;--line:#e5e9f0;--txt:#26303d;--sub:#7a8698;
+--red:#d43030;--green:#0f9d58;--blue:#2563eb;--amber:#b45309;}
+*{box-sizing:border-box}
+body{margin:0;font-family:"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--txt)}
+nav{background:#1e293b;color:#fff;padding:0 24px;display:flex;align-items:center;gap:4px}
+nav .logo{font-weight:700;font-size:16px;margin-right:24px;padding:14px 0}
+nav a{color:#cbd5e1;text-decoration:none;padding:14px 14px;font-size:14px}
+nav a:hover,nav a.on{color:#fff;background:#334155}
+main{max-width:1440px;margin:20px auto;padding:0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:16px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+h2{font-size:16px;margin:0 0 12px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{color:var(--sub);font-weight:500;text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:7px 8px;border-bottom:1px solid #f0f2f6;white-space:nowrap}
+tr:hover td{background:#f8fafc}
+.tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px}
+.tag.up{background:#fee2e2;color:var(--red)}      /* 多头红 */
+.tag.down{background:#e0f2fe;color:#0369a1}       /* 空头蓝 */
+.tag.ok{background:#dcfce7;color:var(--green)}
+.tag.warn{background:#fef3c7;color:var(--amber)}
+.tag.bad{background:#f1f5f9;color:var(--sub)}
+.btn{display:inline-block;border:1px solid var(--line);background:#fff;border-radius:6px;
+padding:5px 12px;font-size:13px;cursor:pointer;text-decoration:none;color:var(--txt)}
+.btn.pri{background:var(--blue);color:#fff;border-color:var(--blue)}
+input,select{border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;background:#fff}
+.flash{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;padding:8px 14px;border-radius:8px;margin-bottom:12px;font-size:13px}
+.grid{display:grid;gap:12px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:8px}
+.kpi{background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:10px 14px}
+.kpi .v{font-size:20px;font-weight:700}
+.kpi .k{font-size:12px;color:var(--sub)}
+.pos{color:var(--red)} .neg{color:var(--green)}
+.muted{color:var(--sub);font-size:12px}
+form.inline{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+/* 行情页标的多选 / K线图 */
+.stockpick{display:flex;gap:6px 14px;flex-wrap:wrap;margin-top:6px;font-size:13px}
+.stockpick label{display:flex;align-items:center;gap:4px;background:#f8fafc;border:1px solid var(--line);
+border-radius:6px;padding:4px 9px;cursor:pointer}
+.stockpick label:hover{border-color:var(--blue)}
+.kwrap{border-top:1px dashed var(--line);padding-top:8px;margin-top:12px}
+.khead{font-size:14px;font-weight:600;margin-bottom:4px}
+.kchart{height:300px;width:100%}
+.kchart4{height:540px;width:100%}
+/* 三态波段图例（与 core/regime.py 的 COLOR 一致） */
+.rb,.rg2,.gr{display:inline-block;padding:0 6px;border-radius:4px;font-size:12px}
+.rb{background:rgba(239,83,80,.18);color:#c62828}
+.rg2{background:rgba(38,166,154,.20);color:#00796b}
+.gr{background:rgba(148,163,184,.28);color:#475569}
+/* 带悬停解释的参数：光标提示可悬停 */
+label[title],select[title],input[title]{cursor:help}
+/* 三态标签 */
+.tag.rg-bull{background:#fee2e2;color:#c62828}
+.tag.rg-bear{background:#ccfbf1;color:#00796b}
+.tag.rg-range{background:#e2e8f0;color:#475569}
+.tag.rg-chg{background:#fef3c7;color:#b45309;font-weight:700}
+/* 状态列备注 */
+.stcell{white-space:normal;min-width:150px}
+.why-bad{white-space:normal;font-size:12px;color:var(--red);margin-top:3px;max-width:220px}
+.why-hint{white-space:normal;font-size:12px;color:var(--sub);margin-top:3px;max-width:220px}
+/* 宽表固定布局：列宽均匀分配，内容放不下就向下换行变长，不再横向撑出屏幕 */
+.tblwrap{overflow-x:auto}
+table.fit{table-layout:fixed}
+table.fit th,table.fit td{white-space:normal;word-break:break-word;overflow-wrap:anywhere}
+table.fit td{vertical-align:top;padding:8px 8px;line-height:1.55}
+table.fit.wide{min-width:1080px}   /* 仪表盘列数多：窄屏宁可横向滚动，也不要逐字断行 */
+table.fit .nw{white-space:nowrap}
+table.fit .num{font-variant-numeric:tabular-nums;white-space:nowrap}
+/* 单元格里的小标签行（代替长句罗列） */
+.kv{font-size:12px;color:var(--sub);margin-top:2px}
+.kv b{color:var(--txt);font-weight:600}
+.sub2{font-size:11.5px;color:var(--sub)}
+details.more{margin-top:3px}
+details.more>summary{cursor:pointer;color:var(--blue);font-size:12px;list-style:none}
+details.more>summary::-webkit-details-marker{display:none}
+details.more>summary:before{content:'▸ '}details.more[open]>summary:before{content:'▾ '}
+/* 参数分组 */
+.pgroup{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:12px;background:#fbfcfe}
+.pgroup h3{font-size:13px;margin:0 0 8px;color:var(--txt)}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px 16px;font-size:13px}
+.prow{display:flex;justify-content:space-between;gap:10px;border-bottom:1px dotted #e8ecf2;padding:3px 0}
+.prow .pv{font-weight:600;white-space:nowrap}
+.ptag{font-size:11px;color:var(--sub);font-weight:400}
+.psearch{background:#ecfdf5;border:1px solid #a7f3d0;border-radius:6px;padding:1px 6px;font-size:11px;color:#065f46}
+.pfix{background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;padding:1px 6px;font-size:11px;color:#475569}
+.poff{opacity:.55}
+.docpre{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.65;max-height:70vh;overflow:auto;background:#fbfcfe;border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.mdbody h3,.mdbody h4,.mdbody h5{margin:18px 0 8px}
+.mdbody p{margin:8px 0;line-height:1.75}
+.mdbody li{margin:4px 0 4px 22px;line-height:1.75}
+.mdbody code{background:#f2f4f8;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.mdbody blockquote{margin:10px 0;padding:8px 12px;background:#f7f9fc;border-left:3px solid var(--line);color:var(--sub);line-height:1.7}
+.mdbody hr{border:0;border-top:1px solid var(--line);margin:18px 0}
+.mdbody .mdcode{background:#fbfcfe;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.6;overflow:auto}
+.mdtab td{white-space:normal}
+.mdtab th{background:#f8fafc}
+</style>
+</head>
+<body>
+<nav>
+  <span class="logo">🌿 趋势识别 · 多/空/震荡</span>
+  <a href="/" class="{{ 'on' if active=='home' }}">趋势仪表盘</a>
+  <a href="/stocks" class="{{ 'on' if active=='stocks' }}">股票清单</a>
+  <a href="/market" class="{{ 'on' if active=='market' }}">行情波段</a>
+  <a href="/settings" class="{{ 'on' if active=='settings' }}">设置</a>
+  <a href="/doc" class="{{ 'on' if active=='doc' }}">需求文档</a>
+</nav>
+<main>
+{% with msgs = get_flashed_messages() %}{% for m in msgs %}<div class="flash">{{ m }}</div>{% endfor %}{% endwith %}
+{% block body %}{% endblock %}
+</main>
+</body>
+</html>

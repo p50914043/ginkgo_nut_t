@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% set active = 'settings' %}
+{% block body %}
+<div class="card">
+  <h2>飞书应用机器人 · 连接检测结果</h2>
+  <p class="muted">生效通道：<b>{{ report.channel }}</b>　接收者：<code>{{ cfg.feishu_receive_id or '未填' }}</code>（{{ cfg.feishu_receive_id_type }}）</p>
+  <table>
+    <tr><th>步骤</th><th>结果</th><th>说明</th></tr>
+    <tr>
+      <td>1. 获取 tenant_access_token</td>
+      <td>{{ '✅ 成功' if report.token_ok else '❌ 失败' }}</td>
+      <td>{{ report.token_msg }}{% if not report.token_ok %}　→ 请核对 App ID / App Secret，并确认应用已创建版本{% endif %}</td>
+    </tr>
+    {% if report.token_ok %}
+    <tr>
+      <td>2. 机器人所在群列表</td>
+      <td>{{ '✅ 共 %d 个' % (report.chats|length,) if report.chats_ok else '⚠️ 读取失败' }}</td>
+      <td>
+        {% if report.chats_ok %}
+          {% if report.chats %}
+            {% for c in report.chats %}<div><code>{{ c.chat_id }}</code> {{ c.name }}</div>{% endfor %}
+          {% else %}<span class="muted">机器人尚未被拉入任何群（若只想私聊，这不影响）</span>{% endif %}
+        {% else %}{{ report.chats_msg }}　→ 缺少 im:chat 只读权限时会失败，可忽略{% endif %}
+      </td>
+    </tr>
+    {% if report.users or report.users_msg %}
+    <tr>
+      <td>3. 手机号 → 接收者 ID</td>
+      <td>{{ '✅ 成功' if report.users_ok else '⚠️ 失败' }}</td>
+      <td>
+        {% if report.users_ok %}
+          {% for u in report.users %}
+            <div>{{ u.input }} → <code>{{ u.user_id }}</code> {{ u.name or '' }}
+              {% if not u.user_id %}<span class="muted">(未匹配到，检查手机号是否为此账号绑定号)</span>{% endif %}</div>
+          {% endfor %}
+          <div class="muted">把上面 ou_ 开头的 id 填入“接收者 ID”，类型 {{ cfg.feishu_receive_id_type }}，即可私聊推送</div>
+        {% else %}{{ report.users_msg }}　→ 需在开放平台开通「通过手机号或邮箱获取用户 ID」权限并发布版本{% endif %}
+      </td>
+    </tr>
+    {% endif %}
+    {% if report.probe %}
+    <tr>
+      <td>4. 发送测试消息</td>
+      <td>{{ '✅ 已送达，去飞书看看' if report.probe.ok else '❌ 未送达' }}</td>
+      <td>通道={{ report.probe.channel }}　code={{ report.probe.code }}　{{ report.probe.msg }}
+        {% if report.probe.code == 230002 %}→ 机器人未启用「机器人能力」或不在该会话中{% endif %}
+        {% if report.probe.code == 99991663 %}→ 缺少 im:message 发送权限{% endif %}
+        {% if report.probe.code == 99991672 %}→ 应用权限未开通/未发布版本{% endif %}
+        {% if report.probe.code == 230001 %}→ 接收者 ID 与 ID 类型不匹配{% endif %}
+      </td>
+    </tr>
+    {% endif %}
+    {% endif %}
+  </table>
+  <p style="margin-top:12px">
+    <a class="btn pri" href="{{ url_for('settings_page') }}">返回设置</a>
+    <a class="btn" href="{{ url_for('dashboard') }}">仪表盘</a>
+  </p>
+</div>
+{% endblock %}

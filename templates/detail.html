@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% set active = 'home' %}
+{% block body %}
+{% set rgsnap = rgsnap or {} %}
+{% set rcls = {'bull':'rg-bull','bear':'rg-bear','range':'rg-range'}.get(rgsnap.get('kind', ''), 'bad') %}
+{% set ind = ind or {} %}
+<div class="card">
+  <h2>{{ st.name }} <span class="muted">({{ st.code }})</span>
+    {% if rgsnap.get('kind') %}
+    <span class="tag {{ rcls }}" title="收盘 {{ ind.close|num }} / MA20 {{ rgsnap.ma.mid|num }} / 慢线 MA{{ rgsnap.ma_slow }} {{ rgsnap.ma.slow|num }}，MA20 五日斜率 {{ rgsnap.ma.slope5|num('%+.2f') }}%（阈值 ±{{ rgsnap.slope_min }}%），ADX(14) {{ rgsnap.adx|num('%.1f') }}（强档需 &gt;{{ rgsnap.adx_min }}）">三态 · {{ rgsnap.level_cn or rgsnap.label_cn }}</span>
+    <span class="tag bad">{{ rgsnap.desc }}</span>
+    <span class="tag {{ rcls }}">本波段第 {{ rgsnap.days }} 日</span>
+    {% if rgsnap.changed %}<span class="tag rg-chg">{{ (rgsnap.grade or {}).get('mark', '🔔') }} 今日趋势变化：{{ rgsnap.prev_label_cn }} → {{ rgsnap.label_cn }}</span>{% endif %}
+    {% if rgsnap.pending %}<span class="tag warn">⏳ 酝酿 {{ rgsnap.pending_label_cn }}（已 {{ rgsnap.pending_days }}/{{ rgsnap.confirm_days }} 日）</span>{% endif %}
+    {% else %}
+    <span class="tag bad">三态 · 均线未就绪</span>
+    {% endif %}
+  </h2>
+  <p class="muted">数据日 {{ rgsnap.date or ind.date or '-' }} · 收盘 <b>{{ ind.close|num }}</b>
+    <span class="{{ 'pos' if (ind.chg_pct or 0)>=0 else 'neg' }}">{{ ind.chg_pct|chg }}</span> ·
+    本页面只做行情识别：不给买卖点、不算仓位与收益。</p>
+  <div class="kchart4" id="kline"></div>
+  <p class="muted">背景色块是三态波段：<span class="rb">多头</span> <span class="rg2">空头</span> <span class="gr">震荡</span>；
+    <b>◆</b> 标在趋势变化的那天（悬停看分级与“旧态 → 新态”）。副图依次为量能 / ADX（虚线为强档门槛 {{ rgsnap.adx_min or cfg.regime.adx_min|int }}）/ MACD，悬停任意一天可看当日指标与“本波段第几天”。</p>
+</div>
+
+{% if rgsnap.get('kind') %}
+<div class="card">
+  <h2>今日趋势 <span class="muted">（唯一判定层：收盘与 MA20 的位置 + MA20 与 MA{{ rgsnap.ma_slow }} 的高低 + MA20 的 5 日斜率 + ADX(14)）</span></h2>
+  <div class="kpis">
+    <div class="kpi"><div class="v" style="color:{{ rgsnap.color }}">{{ rgsnap.level_cn or rgsnap.label_cn }}</div><div class="k">当前三态与强/弱档（{{ rgsnap.date }}）</div></div>
+    <div class="kpi"><div class="v">{{ rgsnap.days }}</div><div class="k">本波段已持续(交易日)</div></div>
+    <div class="kpi"><div class="v">{{ (rgsnap.segment or {}).get('n_strong', 0) }}/{{ rgsnap.days }}</div><div class="k">段内强档天数</div></div>
+    <div class="kpi"><div class="v">{{ (rgsnap.segment or {}).get('chg_pct', 0)|num('%+.2f') }}%</div><div class="k">本波段段内涨跌</div></div>
+    <div class="kpi"><div class="v">{{ rgsnap.n_segments }}</div><div class="k">窗口内波段数</div></div>
+    <div class="kpi"><div class="v">{{ rgsnap.adx|num('%.1f') }}</div><div class="k">ADX(14)·强档需&gt;{{ rgsnap.adx_min|int }}</div></div>
+  </div>
+  <div class="pgrid">
+    <div class="prow" title="快线 MA{{ rgsnap.ma_fast }}（只用于展示与辅助，不参与判据）"><span>MA{{ rgsnap.ma_fast }}<span class="ptag">快线（展示）</span></span><span class="pv">{{ rgsnap.ma.fast|num }}</span></div>
+    <div class="prow" title="中线 MA20：与 MA{{ rgsnap.ma_slow }} 比较定结构，斜率定方向"><span>MA20</span><span class="pv">{{ rgsnap.ma.mid|num }}</span></div>
+    <div class="prow" title="慢线 MA{{ rgsnap.ma_slow }}：中期结构分界"><span>MA{{ rgsnap.ma_slow }}</span><span class="pv">{{ rgsnap.ma.slow|num }}</span></div>
+    <div class="prow" title="MA20 的 5 日斜率%：绝对值小于阈值 {{ rgsnap.slope_min }}% 就归入震荡"><span>MA20 五日斜率</span><span class="pv {{ 'pos' if (rgsnap.ma.slope5 or 0)>=0 else 'neg' }}">{{ rgsnap.ma.slope5|num('%+.2f') }}%</span></div>
+    <div class="prow" title="ADX(14) 动能门槛：结构与方向都对了，ADX 还要超过 {{ rgsnap.adx_min }} 才计“强”，否则只算弱多/弱空"><span>ADX(14) / 强档门槛</span><span class="pv">{{ rgsnap.adx|num('%.1f') }} · &gt;{{ rgsnap.adx_min|int }}</span></div>
+    <div class="prow" title="±{{ rgsnap.slope_min }}% 为斜率阈值；新状态需连续 {{ rgsnap.confirm_days }} 日才切换；持续不足 {{ rgsnap.spike_days }} 日的片段并入相邻主状态"><span>斜率阈值 / 确认日 / 毛刺</span><span class="pv">±{{ rgsnap.slope_min }}% · {{ rgsnap.confirm_days }} 日 · {{ rgsnap.spike_days }} 日</span></div>
+    <div class="prow" title="本段波段的高低点（区间内最高价/最低价）"><span>本波段高低</span><span class="pv">{{ (rgsnap.segment or {}).get('hi')|num }} / {{ (rgsnap.segment or {}).get('lo')|num }}</span></div>
+    <div class="prow" title="%B = (收盘 − 下轨) / (上轨 − 下轨)：不参与三态判定，只用于震荡段的区间定位"><span>区间位置 %B</span><span class="pv">{{ ind.pctb|num('%.2f') }}</span></div>
+  </div>
+  <p class="muted"><b>{{ rgsnap.level_cn or rgsnap.label_cn }}</b> 的含义：{{ rgsnap.desc }}。判据（四条全满足 = <b>强</b>）：收盘 &gt; MA20 且 MA20 &gt; MA{{ rgsnap.ma_slow }} 且斜率 &gt; +{{ rgsnap.slope_min }}% 且 ADX &gt; {{ rgsnap.adx_min|int }} → <b>多头</b>；完全反向 → <b>空头</b>；只满足“收盘在 MA20 一侧 + 斜率同向” → <b>弱多/弱空</b>；其余 → <b>震荡</b>。参数可在<a href="/settings">设置页</a>改，这里的波段划分与仪表盘、飞书播报、<a href="/market">行情波段页</a>读同一份结果。</p>
+</div>
+{% endif %}
+
+{% if rsegs %}
+<div class="card">
+  <h2>图上波段明细 <span class="muted">（最近 {{ rsegs|length }} 段，与K线背景色块一一对应；段内强日 = 四条判据全满足的天数）</span></h2>
+  <div class="tblwrap">
+  <table class="fit">
+    <colgroup><col style="width:9%"><col style="width:17%"><col style="width:10%"><col style="width:10%">
+      <col style="width:6%"><col style="width:8%"><col style="width:10%"><col style="width:12%"><col style="width:18%"></colgroup>
+    <tr><th>三态</th><th>含义</th><th>起</th><th>止</th><th>天数</th><th>段内强日</th><th>段内涨跌</th><th>段内最高/最低</th><th>备注</th></tr>
+    {% for s in rsegs %}
+    <tr>
+      <td><span class="tag {{ {'bull':'rg-bull','bear':'rg-bear','range':'rg-range'}.get(s.kind,'bad') }}">{{ s.level_cn or s.label_cn }}</span></td>
+      <td class="muted">{{ s.desc }}</td>
+      <td class="nw">{{ s.start }}</td><td class="nw">{{ s.end }}</td>
+      <td class="num">{{ s.days }}</td>
+      <td class="num">{{ s.n_strong }}<span class="muted">{% if s.kind != 'range' and s.weak_days %} / 弱{{ s.weak_days }}{% endif %}</span></td>
+      <td class="num {{ 'pos' if s.chg_pct>=0 else 'neg' }}">{{ s.chg_pct|num('%+.2f') }}%</td>
+      <td class="muted num">{{ s.hi|num }} / {{ s.lo|num }}</td>
+      <td class="muted">{% if s.current %}<b>当前波段</b>（第 {{ rgsnap.days }} 日）{% else %}已切换{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>今日盘面快照 <span class="muted">（只是行情参考指标，不构成任何操作建议；缺数据的日子显示 -）</span></h2>
+  <div class="pgrid">
+    <div class="prow"><span>MA5 / MA20 / MA60</span><span class="pv">{{ ind.ma5|num }} / {{ ind.ma20|num }} / {{ ind.ma60|num }}</span></div>
+    <div class="prow" title="收盘价相对 MA20 的乖离%"><span>MA20 乖离</span><span class="pv">{{ ind.bias20|num('%+.2f') }}%</span></div>
+    <div class="prow" title="MA20 的 5 日斜率：三态判据之一"><span>MA20 五日斜率</span><span class="pv">{{ ind.slope5|num('%+.2f') }}%</span></div>
+    <div class="prow" title="趋势强度：ADX 越大趋势越顺，低于 25 通常意味着走平或震荡"><span>ADX / +DI / -DI</span><span class="pv">{{ ind.adx|num('%.1f') }} / {{ ind.plus_di|num('%.1f') }} / {{ ind.minus_di|num('%.1f') }}</span></div>
+    <div class="prow"><span>ATR14</span><span class="pv">{{ ind.atr|num }}</span></div>
+    <div class="prow"><span>RSI14</span><span class="pv">{{ ind.rsi|num('%.1f') }}</span></div>
+    <div class="prow" title="效率系数：越接近 1 越像单边趋势，接近 0 越像来回震荡"><span>ER10</span><span class="pv">{{ ind.er10|num }}</span></div>
+    <div class="prow"><span>布林 下/中/上</span><span class="pv">{{ ind.boll_low|num }} / {{ ind.boll_mid|num }} / {{ ind.boll_up|num }}</span></div>
+    <div class="prow" title="%B = (收盘 − 下轨) / (上轨 − 下轨)：不参与三态判定，只用于震荡段的区间定位"><span>区间位置 %B</span><span class="pv">{{ ind.pctb|num('%.2f') }}</span></div>
+    <div class="prow" title="布林带宽度%：窄=波动被压缩，宽=波动打开"><span>带宽 / 20日均振幅</span><span class="pv">{{ ind.bb_width|num('%.1f') }}% / {{ ind.amp20|num }}%</span></div>
+    <div class="prow"><span>MACD DIF / DEA / 柱</span><span class="pv">{{ ind.dif|num('%+.3f') }} / {{ ind.dea|num('%+.3f') }} / {{ ind.macd_hist|num('%+.3f') }}</span></div>
+    <div class="prow"><span>量能 / 换手 / 成交额</span><span class="pv">{{ ind.vol_ratio|num }}× / {{ ind.turnover|num }}% / {{ ind.amount|num }}</span></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>近20日明细</h2>
+  <div class="tblwrap">
+  <table class="fit">
+    <colgroup><col style="width:11%"><col style="width:9%"><col style="width:9%"><col style="width:9%">
+      <col style="width:8%"><col style="width:9%"><col style="width:9%"><col style="width:18%"><col style="width:9%"></colgroup>
+    <tr><th>日期</th><th>收盘</th><th>涨跌</th><th>MA20</th><th>MA20斜率</th><th>ADX</th><th>ATR</th>
+        <th>BOLL下/中/上</th><th>量能</th></tr>
+    {% for i in range((df|length) - 20, df|length) %}{% if i >= 0 %}
+    {% set r = df.iloc[i] %}
+    <tr>
+      <td class="nw">{{ r['date'] }}</td>
+      <td class="num">{{ r['close']|num }}</td>
+      <td class="num {{ 'pos' if (r['chg_pct'] or 0)>=0 else 'neg' }}">{{ r['chg_pct']|chg }}</td>
+      <td class="num">{{ r['ma20']|num }}</td>
+      <td class="num">{{ r['ma20_slope5']|num('%+.2f') }}%</td>
+      <td class="num">{{ r['adx']|num('%.1f') }}</td>
+      <td class="num">{{ r['atr']|num }}</td>
+      <td class="muted num">{{ r['boll_low']|num }} / {{ r['boll_mid']|num }} / {{ r['boll_up']|num }}</td>
+      <td class="num">{{ r['vol_ratio20']|num }}</td>
+    </tr>
+    {% endif %}{% endfor %}
+  </table>
+  </div>
+  <p class="muted">指标列由 <span class="muted">core/indicators.py</span> 在日线上一一次性算出，缺数据（上市未满周期）一律给 <b>-</b>，不做填补。</p>
+</div>
+{% set rules_mode = 'fold' %}
+{% include '_rules.html' %}
+<script id="kd" type="application/json">{{ k_json|safe }}</script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script src="{{ url_for('static', filename='kline.js') }}"></script>
+<script>
+if (window.echarts) {
+  var KD = JSON.parse(document.getElementById('kd').textContent || '{}');
+  renderKChart(document.getElementById('kline'), KD);
+}
+</script>
+{% endblock %}

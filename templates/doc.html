@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% set active = 'doc' %}
+{% block body %}
+<div class="card">
+  <h2>需求文档
+    <span class="muted">（原文：仓库根目录 需求文档.md，含 三态判据 / 参数 / 波段标注口径 / 每日播报 / 边界与风险）</span>
+    <button class="btn" type="button" onclick="toggleDocRaw(this)">显示原文</button>
+  </h2>
+  <div class="mdbody" id="mdR">{{ html | safe }}</div>
+  <div class="docpre" id="mdRaw" style="display:none">{{ text }}</div>
+</div>
+<script>
+function toggleDocRaw(btn){
+  var r = document.getElementById('mdRaw'), h = document.getElementById('mdR');
+  var show = r.style.display === 'none';
+  r.style.display = show ? '' : 'none';
+  h.style.display = show ? 'none' : '';
+  btn.textContent = show ? '显示渲染' : '显示原文';
+}
+</script>
+{% endblock %}
