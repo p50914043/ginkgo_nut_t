@@ -175,17 +175,40 @@ def _chg(v):
     return ('+%.2f%%' % v) if v >= 0 else ('%.2f%%' % v)
 
 
-def format_trend_message(date_str, trend, title_tag='趋势播报'):
-    """盘后飞书播报：趋势概览 → 逐只行情+三态(强/弱) → 分级切换提醒 → 酝酿中。
+def _tip_line(x):
+    """提示行：标记 + 一句话纪律 + 关键价位 + 为何这么提示（全程不出现仓位与金额）"""
+    t = x.get('tip') or {}
+    seg = []
+    if t.get('pctb') is not None:
+        seg.append('%%B %.2f' % t['pctb'])
+    if t.get('stop_price') is not None:
+        seg.append('硬止损位 %.2f' % t['stop_price'])
+    if t.get('hold_days'):
+        seg.append('第 %d/%d 日' % (t['hold_days'], t.get('max_hold') or 0))
+    if t.get('action') in ('watch', 'bull_wait') and t.get('ma20') is not None:
+        seg.append('MA20 %s · 量比 %s×' % (
+            _px(t.get('ma20')), ('%.2f' % t['vol_ratio']) if t.get('vol_ratio') is not None else '-'))
+    tail = (' ⚠️ ' + t['risk']) if t.get('risk') else ''
+    return '   %s %s｜%s %s｜%s｜%s%s' % (
+        x['name'], x['code'], t.get('mark', ''), t.get('action_cn', ''),
+        ' · '.join(seg) or '-', t.get('reason', ''), tail)
 
-    trend 是 scan.build_trend_report 的结果。只描述行情与分级提示，不给出个股动作。
+
+def format_trend_message(date_str, trend, title_tag='趋势播报'):
+    """盘后飞书播报：趋势概览 → 逐只行情+三态(强/弱) → 分级切换提醒 → 区间做T提示 → 酝酿中。
+
+    trend 是 scan.build_trend_report 的结果。描述行情与分级提示，不给仓位与金额。
     """
     trend = trend or {}
-    lines = ['%s %s｜盘后生成 · 只做行情识别，不产生交易指令' % (date_str, title_tag)]
+    lines = ['%s %s｜盘后生成 · 只做行情识别与区间纪律提示，不接管下单' % (date_str, title_tag)]
     rows = trend.get('rows') or []
     lines.append('📊 趋势：%d 多头 · %d 空头 · %d 震荡（共 %d 只已判定，其中强趋势 %d 只）' % (
         trend.get('n_bull', 0), trend.get('n_bear', 0), trend.get('n_range', 0), len(rows),
         trend.get('n_strong_rows', 0)))
+    if trend.get('n_tip'):
+        lines.append('🎯 提示：%d 只到动作（🟢 买入 %d · 🔺 卖出 %d · 🛑 止损/回避 %d · 🟠 多头回踩 %d）' % (
+            trend.get('n_tip', 0), trend.get('n_tip_buy', 0), trend.get('n_tip_sell', 0),
+            trend.get('n_tip_stop', 0), trend.get('n_tip_watch', 0)))
     for x in rows:
         sg = x.get('segment') or {}
         span = ('本波段自 %s，第 %d 日' % (sg['start'], x['days'])) if sg.get('start') \
@@ -225,6 +248,16 @@ def format_trend_message(date_str, trend, title_tag='趋势播报'):
                 x['name'], x['code'], x['prev_cn'], x['label_cn'], x['desc']))
     if not changed and rows:
         lines.append('今日无趋势变化：%d 只标的延续各自波段' % len(rows))
+    tip_rows = trend.get('tips') or []
+    if tip_rows:
+        lines.append('🎯 提示｜第一纪律：趋势段停手（只给纪律提示，不接管下单）')
+        for x in tip_rows:
+            lines.append(_tip_line(x))
+    hold_rows = trend.get('holds') or []
+    if hold_rows:
+        lines.append('🔵 区间持仓中（按上下沿与止损纪律走）')
+        for x in hold_rows:
+            lines.append(_tip_line(x))
     pending = trend.get('pending') or []
     if pending:
         lines.append('⏳ 酝酿中（新状态还没凑满确认天数，今日口径不变）')

@@ -2,7 +2,7 @@
 {% set active = 'market' %}
 {% block body %}
 <div class="card">
-  <h2>行情波段 <span class="muted">（在历史日K上标出均线三态波段与趋势切换点 · 只做行情识别，不算收益）</span></h2>
+  <h2>行情波段 <span class="muted">（在历史日K上标出均线三态波段与趋势切换点 · 只做行情识别与区间纪律提示，不记账、不算收益）</span></h2>
   <form method="post">
     <div class="inline" style="row-gap:8px">
       <label>开始<input name="start" type="date" value="{{ start }}"></label>
@@ -21,6 +21,22 @@
         <label title="{{ ph.get('confirm_days') }}">连续确认日<input name="confirm_days" style="width:50px" value="{{ form.get('confirm_days','') }}" placeholder="{{ rg.confirm_days }}"></label>
         <label title="{{ ph.get('spike_days') }}">毛刺过滤日<input name="spike_days" style="width:50px" value="{{ form.get('spike_days','') }}" placeholder="{{ rg.spike_days }}"></label>
         <span class="muted">收盘 &gt; MA20 且 MA20 &gt; MA{{ rg.ma_slow }} 且斜率 &gt; +{{ rg.slope_min }}% 且 ADX &gt; {{ rg.adx_min|int }} → 多头；完全反向 → 空头；其余 → 震荡（四条不全则标“弱”）</span>
+      </div>
+    </div>
+
+    <div class="pgroup" style="margin-top:12px">
+      <h3>震荡段做T提示参数 <span class="muted">（只作今日提示列与图上提示线，不留痕历史波段）</span></h3>
+      <input type="hidden" name="t_trade_present" value="1">
+      <div class="inline" style="row-gap:8px">
+        <label title="{{ ph.get('buy_pctb') }}">买入提示%B≤<input name="buy_pctb" style="width:60px" value="{{ form.get('buy_pctb','') }}" placeholder="{{ tt.buy_pctb }}"></label>
+        <label title="{{ ph.get('sell_pctb') }}">卖出提示%B≥<input name="sell_pctb" style="width:60px" value="{{ form.get('sell_pctb','') }}" placeholder="{{ tt.sell_pctb }}"></label>
+        <label title="{{ ph.get('stop_pct') }}">硬止损%<input name="stop_pct" style="width:60px" value="{{ form.get('stop_pct','') }}" placeholder="{{ tt.stop_pct }}"></label>
+        <label title="{{ ph.get('max_hold') }}">最长持有日<input name="max_hold" style="width:50px" value="{{ form.get('max_hold','') }}" placeholder="{{ tt.max_hold }}"></label>
+        <label title="{{ ph.get('pb_touch') }}">回踩容差%<input name="pb_touch" style="width:60px" value="{{ form.get('pb_touch','') }}" placeholder="{{ tt.pb_touch }}"></label>
+        <label title="{{ ph.get('vol_shrink') }}">缩量门槛×<input name="vol_shrink" style="width:60px" value="{{ form.get('vol_shrink','') }}" placeholder="{{ tt.vol_shrink }}"></label>
+        <label title="关掉则本次查询不附提示列（不影响设置页里的保存值）" style="display:flex;align-items:center;gap:6px">
+          <input type="checkbox" name="t_trade_enabled" value="on" {{ 'checked' if tt.enabled }} style="width:auto">启用提示</label>
+        <span class="muted">震荡段：%B ≤ {{ tt.buy_pctb }} 提示买入 / ≥ {{ tt.sell_pctb }} 提示卖出 / −{{ tt.stop_pct }}% 硬止损 / 最长 {{ tt.max_hold }} 日；震荡 → 空头 = 止损回避；多头段回踩 MA20 + 缩量止跌才提示介入（附最高风险）。第一纪律：趋势段停手。</span>
       </div>
     </div>
 
@@ -98,10 +114,11 @@
 <div class="card">
   <h2>日K · 三态波段与趋势切换点</h2>
   <p class="muted">背景色块 = 均线 + ADX 判定的三态波段（<span class="rb">多头·红</span> <span class="rg2">空头·绿</span> <span class="gr">震荡·灰</span>）；
-    <b>◆</b> 标在趋势变化的那天，悬停可看分级与“旧态 → 新态”；副图为量能 / ADX（虚线为强档门槛 {{ rg.adx_min|int }}）/ MACD。悬停任意一天可看当日指标与“本波段第几天”。</p>
+    <b>◆</b> 标在趋势变化的那天，悬停可看分级与“旧态 → 新态”；副图为量能 / ADX（虚线为强档门槛 {{ rg.adx_min|int }}）/ MACD。悬停任意一天可看当日指标与“本波段第几天”；悬停最后一天可同时看到今日提示（%B 上下沿价位与硬止损位）。图上的 <b>⛔ 趋势段停手</b> 意味着该段不是震荡，不给区间提示。</p>
   {% for c in charts %}
   <div class="kwrap">
     <div class="khead">{{ c.name }} <span class="muted">{{ c.code }}</span>
+      {% if c.tip.get('action') %}<span class="tag {{ {'buy':'tp-buy','sell':'tp-sell','stop':'tp-stop','expire':'tp-stop','avoid':'tp-stop','watch':'tp-watch','hold':'tp-hold','wait':'tp-wait','bull_wait':'tp-wait','off':'tp-off'}.get(c.tip.action, 'tp-off') }}" title="{{ c.tip.reason }}">{{ c.tip.mark }} {{ c.tip.action_cn.split('｜')[0] }}</span>{% endif %}
       <span class="muted">· 画了 {{ c.bars }} 根 · {{ c.n_segments }} 个波段（{{ c.n_flips }} 次趋势切换，其中 🔴🔴 强信号 {{ c.n_strong_flips }} 次）
         · 多头 {{ c.n_bull }} / 空头 {{ c.n_bear }} / 震荡 {{ c.n_range }} / 未就绪 {{ c.n_unknown }} 天 · 强档 {{ c.n_strong }} 天</span>
       <a class="btn" style="float:right" href="/stock/{{ c.code }}">看详情</a></div>

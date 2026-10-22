@@ -11,6 +11,8 @@ from .indicators import compute_factors, snapshot as ind_snapshot
 OK = '正常'
 FLIP_BARS = 501        # 切换分级统计的回测窗口（交易日）
 FLIP_HORIZON = 10      # 切换次日收盘买入后看多少个交易日
+# 今天要提醒的提示动作（其余 hold/wait/bull_wait/off 只是状态描述）
+TIP_ALERT = ('buy', 'sell', 'stop', 'expire', 'avoid', 'watch')
 
 
 def scan(cfg=None, stocks=None, refresh=True):
@@ -59,9 +61,11 @@ def build_trend_report(scan_out):
     """趋势播报：每只标的当前三态（强/弱）、本波段第几天、是否刚切换、是否在酝酿。
 
     changed=今日已确认切换（按分级推提醒）：strong=震荡→趋势（强信号），
-    momentum=趋势→震荡（动能变化）；pending=原始判定已转新状态但还没凑满确认天数。
+    momentum=趋势→震荡（动能变化）；pending=原始判定已转新状态但还没凑满确认天数；
+    tips=今日有动作的区间做T/回踩介入提示（来自 core/tips.py，不影响三态口径）。
     """
     rows, changed, strong_changed, momentum_changed, pending = [], [], [], [], []
+    tips_alert, holds = [], []
     for r in scan_out['results']:
         snap = r.get('regime')
         if not snap or snap['kind'] == regime.UNKNOWN:
@@ -77,8 +81,14 @@ def build_trend_report(scan_out):
                'grade': snap.get('grade'),
                'pending': snap['pending'], 'pending_cn': snap['pending_label_cn'],
                'pending_days': snap['pending_days'], 'confirm_days': snap['confirm_days'],
-               'n_segments': snap.get('n_segments', 0)}
+               'n_segments': snap.get('n_segments', 0),
+               'tip': r.get('tip') or {}}
         rows.append(row)
+        tip = row['tip']
+        if tip.get('action') in TIP_ALERT:
+            tips_alert.append(row)
+        elif tip.get('action') == 'hold':
+            holds.append(row)
         if row['changed']:
             changed.append(row)
             if (row['grade'] or {}).get('grade') == 'strong':
@@ -89,8 +99,13 @@ def build_trend_report(scan_out):
             pending.append(row)
     cnt = {k: sum(1 for x in rows if x['kind'] == k)
            for k in (regime.BULL, regime.BEAR, regime.RANGE)}
+    act = lambda a: sum(1 for x in tips_alert if x['tip'].get('action') == a)
     return {'rows': rows, 'changed': changed, 'strong_changed': strong_changed,
             'momentum_changed': momentum_changed, 'pending': pending,
+            'tips': tips_alert, 'holds': holds,
+            'n_tip_buy': act('buy'), 'n_tip_sell': act('sell'),
+            'n_tip_stop': act('stop') + act('expire') + act('avoid'),
+            'n_tip_watch': act('watch'), 'n_tip': len(tips_alert),
             'n_bull': cnt[regime.BULL], 'n_bear': cnt[regime.BEAR],
             'n_range': cnt[regime.RANGE], 'n_rows': len(rows),
             'n_strong_rows': sum(1 for x in rows if x['strong']),

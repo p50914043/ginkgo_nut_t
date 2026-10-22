@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """日线趋势识别工具 Web入口
 
-三态行情（core/regime.py，只用均线）是唯一判定层：多头 / 空头 / 震荡。
-工具只做两件事——把行情识别出来、把波段标出来：
-  网页仪表盘与飞书播报：每天盘后给出每只标的的当前三态、本波段第几天、是否发生趋势变化
+判定层（core/regime.py，均线 + ADX）只有一层：多头 / 空头 / 震荡（内含强/弱两档）。
+页面与推送做三件事：
+  网页仪表盘与飞书播报：每天盘后给出当前三态、本波段第几天、是否发生趋势变化（按 🔴🔴/🟡 分级）
   日K图：背景色块标出三态波段，◆ 标出趋势切换的那天
-需求已去掉交易层：不产生买/卖指令、不算仓位与收益、不做参数寻优。
+  提示层（core/tips.py）：震荡段给做T纪律提示（%B 上下沿 / 硬止损 / 最长持有），
+  多头段给“回踩 MA20 + 缩量止跌”介入提示并标最高风险；趋势段停手。
+依旧不算收益与胜率、不给仓位金额、不对接任何下单接口。
 """
 import sys
 sys.path.insert(0, 'libs')
@@ -20,7 +22,7 @@ from html import escape as _esc
 import numpy as np
 from flask import Flask, render_template, request, redirect, url_for, jsonify, flash
 
-from core import data, config, regime, scan as scan_mod
+from core import data, config, regime, scan as scan_mod, tips
 from core import autorun
 from core.indicators import compute_factors, snapshot as ind_snapshot
 from core.notifier import push as notify_push, format_trend_message, describe_channel
@@ -38,6 +40,23 @@ MAX_CHARTS = 9
 # 三态参数（斜率与 ADX 门槛是浮点，周期与天数取整）
 REGIME_NUM_KEYS = ('ma_fast', 'ma_slow', 'slope_min', 'confirm_days', 'adx_min', 'spike_days')
 REGIME_INT_KEYS = ('ma_fast', 'ma_slow', 'confirm_days', 'spike_days')
+# 提示层参数（%B 上下沿与回踩容差是浮点，持有日数取整）
+TIP_NUM_KEYS = ('buy_pctb', 'sell_pctb', 'stop_pct', 'max_hold', 'pb_touch', 'vol_shrink')
+TIP_INT_KEYS = ('max_hold',)
+
+
+def _form_section(form, keys, int_keys, base):
+    """表单里的一小段数值参数：空值与非法值都不改原配置，整数键取整"""
+    out = dict(base or {})
+    for k in keys:
+        if form.get(k) in (None, ''):
+            continue
+        try:
+            v = float(form[k])
+        except (TypeError, ValueError):
+            continue
+        out[k] = int(v) if k in int_keys else v
+    return out
 
 # 参数悬停解释（设置页/行情页共用，模板里写 title="{{ ph.get('键名') }}"）
 PARAM_HELP = {
@@ -47,6 +66,12 @@ PARAM_HELP = {
     'confirm_days': '滞回确认天数：新状态要连续成立这么多天才真正切换，防止一天一改。凑满之前叫“酝酿中”。',
     'adx_min': 'ADX(14) 动能门槛：结构、方向都对了，ADX 还要超过它才计“强”；不超过则只算弱多/弱空（三态不变）。',
     'spike_days': '毛刺过滤天数：持续不足这么多日的片段并入相邻主状态，不成波段、不参与提醒（避免标注闪烁）。',
+    'buy_pctb': '震荡段买入提示门槛：%B ≤ 这个值（靠布林下轨）才给“买入提示”。只在生效三态为震荡时适用。',
+    'sell_pctb': '震荡段卖出提示门槛：持仓中 %B ≥ 这个值（靠布林上轨）就给“卖出提示”。',
+    'stop_pct': '硬止损%：自提示买入当日收盘往下跌这么多就提示止损，不看当时市场情绪。',
+    'max_hold': '最长持有交易日数：到天数还没到上沿，也提示离场（不让区间单变成长线）。',
+    'pb_touch': '多头回踩容差%：当日最低价距 MA20 在这么近以内算“踩到均线”。调小→要贴得更紧才提示。',
+    'vol_shrink': '缩量门槛：当日量比（成交量/20日均量）低于这个倍数才算缩量。调大→对“缩量”要求更严。',
     'data_start': '本地行情数据的起始日期（只读；改动后需重新拉数据）。',
     'auto_run_enabled': '工作日到点自动“更新数据→三态扫描→飞书播报”一次；需保持本网页服务（run.sh）在跑。',
     'auto_run_time': '盘后触发时刻（HH:MM，24 小时制）。建议晚于数据源出日线的时间，否则会判定非交易日而跳过。',
@@ -146,16 +171,12 @@ def settings_page():
     cfg = config.load_config()
     if request.method == 'POST':
         if 'regime_present' in request.form:      # 只重置三态段，避免误清其它配置
-            rg = dict(cfg.get('regime') or {})
-            for k in REGIME_NUM_KEYS:
-                if request.form.get(k) in (None, ''):
-                    continue
-                try:
-                    v = float(request.form[k])
-                except ValueError:
-                    continue
-                rg[k] = int(v) if k in REGIME_INT_KEYS else v
-            cfg['regime'] = rg
+            cfg['regime'] = _form_section(request.form, REGIME_NUM_KEYS, REGIME_INT_KEYS,
+                                          cfg.get('regime'))
+        if 't_trade_present' in request.form:     # 提示层参数（含开关）
+            tt = _form_section(request.form, TIP_NUM_KEYS, TIP_INT_KEYS, cfg.get('t_trade'))
+            tt['enabled'] = request.form.get('t_trade_enabled') == 'on'
+            cfg['t_trade'] = tt
         if 'auto_run_present' in request.form:
             cfg['auto_run_enabled'] = request.form.get('auto_run_enabled') == 'on'
             cfg['auto_run_retry'] = request.form.get('auto_run_retry') == 'on'
@@ -172,7 +193,8 @@ def settings_page():
         autorun.start(cfg)          # 开关改动立即生效
         flash('参数已保存')
         return redirect(url_for('settings_page'))
-    return render_template('settings.html', cfg=cfg, rg=cfg.get('regime') or {})
+    return render_template('settings.html', cfg=cfg, rg=cfg.get('regime') or {},
+                           tt=cfg.get('t_trade') or {})
 
 
 @app.route('/stock/<code>')
@@ -186,6 +208,7 @@ def stock_detail(code):
     return render_template('detail.html', st=st, df=fdf,
                            ind=ind_snapshot(fdf.iloc[-1]) if len(fdf) else None,
                            rgsnap=regime.snapshot(full, cfg) if len(full) else None,
+                           tip=_tip_pack(full, cfg),
                            rsegs=_regime_segs(full, cfg, DETAIL_BARS),
                            k_json=json.dumps(_kline_payload(full, cfg), ensure_ascii=False))
 
@@ -257,7 +280,8 @@ def _kline_payload(full, cfg, n=DETAIL_BARS, code=None):
             'hist': _nan2none(win['macd_hist'], 4),
             'areas': areas, 'flips': flips,
             'adx_min': regime.rcfg(cfg)['adx_min'],
-            'regime': regime.snapshot(full, cfg) if len(full) else None}
+            'regime': regime.snapshot(full, cfg) if len(full) else None,
+            'tip': _tip_pack(full, cfg)}
 
 
 @app.route('/api/kline/<code>')
@@ -292,18 +316,36 @@ def _load_ctx(cfg=None, stocks=None, refresh=True):
 
 
 def _cfg_from_form(form, cfg=None):
-    """表单里的三态参数覆盖到配置上：图上波段、波段统计、日K标注必须同一份口径"""
+    """表单里的三态/提示参数覆盖到配置上：图上波段、波段统计、日K标注、提示必须同一份口径"""
     cfg = cfg or config.load_config()
-    rg = dict(cfg.get('regime') or {})
-    for k in REGIME_NUM_KEYS:
-        if form.get(k) in (None, ''):
-            continue
-        try:
-            v = float(form[k])
-        except (TypeError, ValueError):
-            continue
-        rg[k] = int(v) if k in REGIME_INT_KEYS else v
-    return dict(cfg, regime=rg)
+    rg = _form_section(form, REGIME_NUM_KEYS, REGIME_INT_KEYS, cfg.get('regime'))
+    tt = _form_section(form, TIP_NUM_KEYS, TIP_INT_KEYS, cfg.get('t_trade'))
+    if form.get('t_trade_enabled') is not None:
+        tt['enabled'] = form.get('t_trade_enabled') in ('on', '1', 'true', 'True')
+    elif form.get('t_trade_present') is not None:
+        tt['enabled'] = False        # 提示区被提交但没有勾选开关
+    out = dict(cfg, regime=rg)
+    if any(form.get(k) not in (None, '') for k in TIP_NUM_KEYS) or 't_trade_present' in form:
+        out['t_trade'] = tt
+    return out
+
+
+def _tip_pack(df, cfg):
+    """今日提示包：给页面与图用（附带把 %B 上下沿换算成当日布林轨道上的价位）"""
+    snap = regime.snapshot(df, cfg)
+    tip = tips.for_stock(df, cfg, snap) if snap else None
+    if not tip:
+        return {}
+    out = dict(tip)
+    try:
+        lo = float(df['boll_low'].values[-1])
+        up = float(df['boll_up'].values[-1])
+        if lo == lo and up == up and up > lo:
+            out['t_buy_px'] = round(lo + tip['buy_pctb'] * (up - lo), 3)
+            out['t_sell_px'] = round(lo + tip['sell_pctb'] * (up - lo), 3)
+    except (KeyError, IndexError, TypeError, ValueError):
+        pass
+    return out
 
 
 def _chart_bundle(stocks, dfs, start, end, cfg, max_bars=CHART_BARS, max_charts=MAX_CHARTS):
@@ -347,6 +389,7 @@ def _chart_bundle(stocks, dfs, start, end, cfg, max_bars=CHART_BARS, max_charts=
             'hist': _nan2none(d['macd_hist'], 4),
             'areas': areas, 'flips': flips,
             'adx_min': regime.rcfg(cfg)['adx_min'],
+            'tip': _tip_pack(df, cfg),
         })
     return bundles
 
@@ -375,7 +418,7 @@ def market_page():
     return render_template('market.html', stocks=stocks, form=form, cfg=cfg,
                            charts=charts, stats=stats, sel_codes=sel_codes,
                            start=start, end=end,
-                           rg=cfg.get('regime') or {})
+                           rg=cfg.get('regime') or {}, tt=cfg.get('t_trade') or {})
 
 
 @app.route('/backtest')

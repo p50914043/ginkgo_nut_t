@@ -2,9 +2,10 @@
 {% set active = 'settings' %}
 {% block body %}
 <div class="card">
-  <h2>三态判定参数 <span class="muted">（需求已去掉交易层：这里只剩“怎么判多头/空头/震荡”和“怎么播报”，鼠标悬停参数名可看解释）</span></h2>
+  <h2>三态判定参数 <span class="muted">（两层：判定层“怎么判多头/空头/震荡” + 提示层“震荡段怎么做T”（还有怎么播报），鼠标悬停参数名可看解释）</span></h2>
   <form method="post">
     <input type="hidden" name="regime_present" value="1">
+    <input type="hidden" name="t_trade_present" value="1">
     <input type="hidden" name="auto_run_present" value="1">
     <div class="pgroup">
       <h3>均线 + ADX 判据 <span class="ptag">唯一的环境判定层</span></h3>
@@ -21,6 +22,23 @@
         只满足“收盘在 MA20 一侧 + 斜率同向”时记<b>弱多头 / 弱空头</b>（三态归属不变，只降级标注）。
         新状态要连续 {{ rg.confirm_days }} 日才切换；持续不足 {{ rg.spike_days }} 日的片段并入相邻主状态，不成波段。
         中线固定 MA20（写死在 <span class="muted">core/regime.py</span>），快线只用于展示与辅助。改这里会同时改变<a href="/market">行情波段页</a>的色块划分、仪表盘三态与每日飞书播报——三处读同一份结果。</p>
+    </div>
+
+    <div class="pgroup">
+      <h3>震荡段做T提示 <span class="ptag">提示层：只给纪律提醒</span></h3>
+      <div class="pgrid">
+        <label title="关掉后，页面与飞书播报只报三态与切换分级，不再给 %B 上下沿、硬止损与回踩提示（判定层不受影响）" style="display:flex;align-items:center;gap:6px;grid-column:1/-1">
+          <input type="checkbox" name="t_trade_enabled" value="on" {{ 'checked' if tt.enabled }} style="width:auto">
+          开启提示层（震荡段 %B 上下沿与硬止损 / 多头回踩介入）</label>
+        <label title="{{ ph.get('buy_pctb') }}">买入提示 %B ≤<input name="buy_pctb" type="number" step="0.01" min="0" max="1" value="{{ tt.buy_pctb }}" style="width:100%"></label>
+        <label title="{{ ph.get('sell_pctb') }}">卖出提示 %B ≥<input name="sell_pctb" type="number" step="0.01" min="0" max="1" value="{{ tt.sell_pctb }}" style="width:100%"></label>
+        <label title="{{ ph.get('stop_pct') }}">硬止损(%)<input name="stop_pct" type="number" step="0.5" min="0" value="{{ tt.stop_pct }}" style="width:100%"></label>
+        <label title="{{ ph.get('max_hold') }}">最长持有(日)<input name="max_hold" type="number" min="1" value="{{ tt.max_hold }}" style="width:100%"></label>
+        <label title="{{ ph.get('pb_touch') }}">回踩容差(%)<input name="pb_touch" type="number" step="0.1" min="0" value="{{ tt.pb_touch }}" style="width:100%"></label>
+        <label title="{{ ph.get('vol_shrink') }}">缩量门槛(×)<input name="vol_shrink" type="number" step="0.05" min="0" value="{{ tt.vol_shrink }}" style="width:100%"></label>
+      </div>
+      <p class="muted" style="margin:8px 0 0">纪律原文：震荡段 <b>%B ≤ {{ tt.buy_pctb }} 提示买入 / %B ≥ {{ tt.sell_pctb }} 提示卖出 / 自提示买入当日收盘 −{{ tt.stop_pct }}% 硬止损 / 最长持 {{ tt.max_hold }} 日</b>；<b>震荡 → 空头 = 止损回避</b>；多头段要“回踩 MA20（最低价距均线 {{ tt.pb_touch }}% 以内）+ 缩量（量比 &lt; {{ tt.vol_shrink }}×）+ 收盘止跌”三条全凑才给介入提示，并附<b>最高风险</b>警示。
+        第一纪律是<b>趋势段停手</b>：提示只在已判定的震荡波段里成立，空头段一律不给。段内的持仓回放只用来回答“今天该提示买入、卖出还是止损”，<b>不记账、不算收益与胜率、不给仓位金额、不接入任何下单接口</b>。</p>
     </div>
 
     <div class="pgroup">
@@ -41,13 +59,13 @@
 
     <div class="pgroup">
       <h3>推送内容 <span class="ptag">固定口径，不可配置</span></h3>
-      <p class="muted" style="margin:0">① 趋势概览（多少只多头/空头/震荡，含强趋势只数）② 逐只标的：收盘价、涨跌幅、当前三态与强/弱档、本波段起始日与第几天、MA20 与慢线及斜率、ADX（震荡段附加区间位置 %B）③ 按分级推送切换：<b>🔴🔴 强信号</b>（震荡 → 趋势）、<b>🟡 动能变化</b>（趋势 → 震荡）④ ⏳ 酝酿中的新状态（还没凑满 {{ rg.confirm_days }} 日）。<br>
-        播报只描述行情，不含任何买卖指令、价位与仓位建议。</p>
+      <p class="muted" style="margin:0">① 趋势概览（多少只多头/空头/震荡，含强趋势只数，以及 🎯 到动作的提示只数）② 逐只标的：收盘价、涨跌幅、当前三态与强/弱档、本波段起始日与第几天、MA20 与慢线及斜率、ADX（震荡段附加区间位置 %B）③ 按分级推送切换：<b>🔴🔴 强信号</b>（震荡 → 趋势）、<b>🟡 动能变化</b>（趋势 → 震荡）④ <b>🎯 提示</b>：🟢 买入 / 🔺 卖出 / 🛑 止损与回避 / ⌛ 超期 / 🟠 多头回踩介入（附关键价位与理由）、<b>🔵 区间持仓中</b>单独成节 ⑤ ⏳ 酝酿中的新状态（还没凑满 {{ rg.confirm_days }} 日）。<br>
+        播报只描述行情与区间纪律，不含仓位与金额、不算收益、不接管任何下单。</p>
     </div>
 
     <div><button class="btn pri">保存参数</button></div>
   </form>
-  <p class="muted" style="margin-top:10px">已删除的参数：交易相关的参数（资金与成本、持仓与档位、入场闸门、指标票数等）已全部按需求移除，config.yaml 里的旧键在保存时会被自动剪掉；<a href="/doc">需求文档</a>里记录了这次调整。</p>
+  <p class="muted" style="margin-top:10px">已删除的参数：仓位与资金、成本与冲击、下单开关等交易参数依旧全部移除（本工具不对接交易接口），config.yaml 里的旧键在保存时会被自动剪掉；<a href="/doc">需求文档</a>里记录了这两次调整。</p>
 </div>
 
 <div class="card">

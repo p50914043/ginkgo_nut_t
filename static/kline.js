@@ -1,7 +1,7 @@
 /* 三态K线绘图（行情页与个股详情页共用）
  * 一张图里同时说明：均线定出的三态波段背景、趋势切换点、量能 / ADX / MACD 副图。
  * 数据来源：app.py 的 _chart_bundle()（行情页）与 /api/kline/<code>（详情页），字段同名。
- * 只做行情识别展示：图上不再画买卖点。
+ * 只做行情识别展示 + 今日区间纪律提示（震荡段 %B 上下沿价位 / 硬止损位），不画历史买卖点。
  */
 function kg(v) { return (v === null || v === undefined) ? '-' : v; }
 
@@ -54,6 +54,24 @@ function renderKChart(el, c) {
                  showSymbol: false, lineStyle: {color: '#cbd5e1', width: 1, type: 'dashed'},
                  itemStyle: {color: '#cbd5e1'}, tooltip: {show: false}, z: 3});
   });
+  // 震荡段的今日纪律位：只沿窗口尾部画一段，不把轨道当历史支撑
+  var tp = c.tip || {};
+  if (tp.kind === 'range') {
+    var lvl = [], i0 = Math.max(0, c.dates.length - 25), i1 = c.dates.length - 1;
+    var push = function (v, col, txt) {
+      if (v === null || v === undefined) return;
+      lvl.push([{coord: [c.dates[i0], v], lineStyle: {color: col, type: 'dashed', width: 1},
+                 label: {show: true, position: 'insideEndTop', formatter: txt,
+                         color: col, fontSize: 9}}, {coord: [c.dates[i1], v]}]);
+    };
+    push(tp.t_buy_px, '#15803d', '下沿提示位');
+    push(tp.t_sell_px, '#c62828', '上沿提示位');
+    push(tp.stop_price, '#c2410c', '硬止损');
+    if (lvl.length) {
+      series.push({name: '今日提示位', type: 'line', data: [], xAxisIndex: 0, yAxisIndex: 0,
+                   markLine: {silent: true, symbol: 'none', data: lvl}});
+    }
+  }
   // 趋势切换点：菱形（分级标记在悬停里） + 新状态文字
   series.push({name: '趋势切换', type: 'scatter', data: (c.flips || []).map(function (f) {
                  return {value: f.value, text: f.text, color: f.color, grade: f.grade,
@@ -96,6 +114,18 @@ function renderKChart(el, c) {
                ' 日（段内强 ' + a.n_strong + ' 日，累计 ' + a.chg_pct + '%）';
     var f = flipByDate[d];
     if (f) t += '<br><b>趋势变化</b>：' + f.text;
+    // 今日提示只挂在窗口最后一天（提示层给的是“今天该提醒什么”，不是历史信号）
+    var tip = c.tip || {};
+    if (tip.action && i === c.dates.length - 1) {
+      t += '<br><b>今日提示</b>：' + tip.mark + ' ' + tip.action_cn;
+      t += '<br>' + (tip.reason || '');
+      if (tip.t_buy_px || tip.t_sell_px || tip.stop_price) {
+        t += '<br>下沿 ' + kg(tip.t_buy_px) + ' / 上沿 ' + kg(tip.t_sell_px) +
+             ' / 硬止损 ' + kg(tip.stop_price);
+      }
+      if (tip.hold_days) t += '　第 ' + tip.hold_days + '/' + kg(tip.max_hold) + ' 日';
+      if (tip.risk) t += '<br><span style="color:#c2410c">⚠️ ' + tip.risk + '</span>';
+    }
     t += '<br>MA5 ' + kg(c.ma5[i]) + ' / MA20 ' + kg(c.ma20[i]) + ' / MA60 ' + kg(c.ma60[i]);
     t += '<br>布林 ' + kg(c.boll_low[i]) + ' / ' + kg(c.boll_mid[i]) + ' / ' + kg(c.boll_up[i]) +
          '　区间位置 %B ' + kg(c.pctb ? c.pctb[i] : null) +

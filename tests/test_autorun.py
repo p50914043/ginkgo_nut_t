@@ -98,6 +98,15 @@ def _item(**over):
     return it
 
 
+def _buy_tip():
+    """core/tips.py 的买入提示形状（手工搭，不拉行情）"""
+    return {'action': 'buy', 'mark': '🟢', 'action_cn': '买入提示｜%B 已到区间下沿',
+            'kind': 'range', 'level_cn': '震荡', 'buy_pctb': 0.1, 'sell_pctb': 0.9,
+            'stop_pct': 5.0, 'max_hold': 15, 'pctb': 0.08, 'stop_price': 14.6,
+            'entry_date': '2026-10-19', 'entry_close': 15.35, 'hold_days': 1,
+            'left_days': 14, 'reason': '买入提示｜%B 已到区间下沿', 'risk': '', 'need': []}
+
+
 def test_holiday_skip_recorded_and_not_retried():
     """数据日期 != 今天 → 跳过推送并记录，同日不再重试"""
     calls = []
@@ -122,14 +131,15 @@ def test_holiday_skip_recorded_and_not_retried():
 
 
 def test_trading_day_pushes_and_persists():
-    """交易日：推的是趋势播报（含三态、本波段第几天、今日变化），状态里记下行数与趋势计数"""
+    """交易日：推的是趋势播报（含三态、本波段第几天、今日变化、做T提示），状态里记下行数与各类计数"""
     got = {}
     results = [_item(), _item(code='600887', name='伊利股份', close=27.76, chg_pct=-0.4,
                               regime=_snap(kind='range', label_cn='震荡', level_cn='震荡',
                                            strong=False, adx=14.0,
                                            desc='均线纠缠 · 区间震荡', days=5,
                                            changed=False, prev='range', grade=None,
-                                           prev_label_cn='震荡'))]
+                                           prev_label_cn='震荡'),
+                              tip=_buy_tip())]
     orig_scan, orig_push = autorun.scan_mod.scan, autorun.push
     autorun.scan_mod.scan = lambda cfg=None, stocks=None, refresh=True: {
         'results': results, 'cfg': cfg or DEFAULT_CONFIG, 'date': '2026-10-19'}
@@ -145,6 +155,8 @@ def test_trading_day_pushes_and_persists():
         assert '本波段自 2026-10-13，第 7 日' in txt
         assert '· ADX 31.0' in txt                  # 强档门槛判据一同带出
         assert '🔴🔴 强信号｜震荡 → 趋势' in txt and '震荡 → 多头' in txt
+        assert '🎯 提示：1 只到动作（🟢 买入 1' in txt      # 提示只数进概览行
+        assert '伊利股份 600887｜🟢 买入提示｜%B 已到区间下沿｜%B 0.08 · 硬止损位 14.60 · 第 1/15 日' in txt
         st = autorun.load_state()
         assert st['last_run_date'] == '2026-10-19' and st['last_result'] == '成功'
         assert st['last_pushed'] and 'last_skip_date' not in st
@@ -153,7 +165,9 @@ def test_trading_day_pushes_and_persists():
         assert st['last_data_date'] == '2026-10-19'
         assert '数据日期 2026-10-19' in st['last_detail']
         assert '🔴🔴 1 / 🟡 0' in st['last_detail']      # 摘要也带分级计数
+        assert '提示 1 只' in st['last_detail']            # 提示只数同样进摘要
         assert st['last_strong_flips'] == 1 and st['last_momentum_flips'] == 0
+        assert st['last_tips'] == 1
         assert 'webhook' in open(autorun.LOG_PATH, encoding='utf-8').read()
     finally:
         autorun.scan_mod.scan, autorun.push = orig_scan, orig_push

@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """Web 层测试：K线波段数据包(_chart_bundle) / 路由与模板渲染 / 参数落盘 / 口径护栏
 
-需求已去掉交易层：这里同时充当“页面不得再出现买卖指令与模式字样”的护栏。
+两层结构都要护住：判定层（三态 + 分级）与提示层（震荡段做T / 多头回踩）。
+页面可以写“买入提示/卖出提示/硬止损”这些纪律用词，但不允许回到交易口径（模式B/C、网格、仓位金额、盈亏）。
 """
 import sys
 sys.path.insert(0, 'libs')
@@ -22,9 +23,11 @@ from core import scan as scan_mod
 
 STOCK = [{'code': '000001', 'name': '测试股'}]
 
-# 界面禁止出现的交易/指令用词（需求：只做行情识别）
-FORBIDDEN = ('买入', '卖出', '做多', '做空', '低吸', '高抛', '止盈', '止损',
-             '模式B', '模式C', '网格', '下单', '盈亏', '胜率', '回测')
+# 界面禁止出现的交易口径用词（需求 v3.2：提示层只给纪律提醒，不回到交易层）
+FORBIDDEN = ('模式B', '模式C', '网格', '止盈', '低吸', '高抛', '做多', '做空',
+             '盈亏', '买入点', '卖出点', '目标价', '加仓', '减仓', '满仓', '下单指令')
+# 提示层必须把需求里的纪律写到页面上（护栏往回加：旧口径“只说三态”不能回归）
+TIP_WORDS = ('买入提示', '卖出提示', '硬止损', '最长持', '止损回避', '趋势段停手')
 
 # 页面统一的规则区：那一块是“把判定规则与运行机制标清楚”的披露区，
 # 允许引用历史统计与区间定位口径；数据区（逐票行、推送文本）仍然严格禁用。
@@ -55,6 +58,20 @@ def mkdf(n=80, closes=None):
 DF = mkdf()
 D = list(DF['date'])
 CFGW = dict(cfg_mod.DEFAULT_CONFIG)     # K线包里的三态背景色块需要 regime 参数
+TTW = dict(CFGW['t_trade'])             # 提示层参数（默认 0.10 / 0.90 / 5% / 15 日）
+
+
+def _tip(**over):
+    """core/tips.py 返回字典的形状（手工搭，不拉行情）"""
+    t = {'action': 'buy', 'mark': '🟢', 'action_cn': '买入提示｜%B 已到区间下沿',
+         'kind': 'range', 'level_cn': '震荡', 'buy_pctb': TTW['buy_pctb'],
+         'sell_pctb': TTW['sell_pctb'], 'stop_pct': TTW['stop_pct'],
+         'max_hold': TTW['max_hold'], 'pctb': 0.08, 'stop_price': 14.6,
+         'entry_date': '2026-10-19', 'entry_close': 15.35, 'hold_days': 1,
+         'left_days': 14, 'ma20': None, 'vol_ratio': None,
+         'reason': '买入提示｜%B 已到区间下沿', 'risk': '', 'need': []}
+    t.update(over)
+    return t
 # 升→平→跌的长序列：默认三态参数下能切出 多头/震荡/空头 多段（验证图上波段与切换点）
 SWING_DF = mkdf(closes=list(np.linspace(10, 16, 120)) + list(np.linspace(16, 15.4, 60)) +
                 list(np.linspace(15.4, 10.5, 120)))
@@ -94,10 +111,13 @@ def test_chart_bundle_paints_regime_segments_and_flip_points():
     assert b['n_unknown'] == 59                      # 慢线 MA60 没就绪的前 59 根单列
     # 副图数据齐备：量能/ADX/MACD 三轨 + 三条均线 + 布林 + %B（只定位不判定）
     for key in ('vol', 'adx', 'atr', 'dif', 'dea', 'hist', 'ma5', 'ma20', 'ma60',
-                'boll_up', 'boll_mid', 'boll_low', 'pctb', 'k', 'adx_min'):
+                'boll_up', 'boll_mid', 'boll_low', 'pctb', 'k', 'adx_min', 'tip'):
         assert key in b, key
     assert b['adx_min'] == CFGW['regime']['adx_min']    # 前端虚线跟参数走，不写死 25
     assert len(b['k']) == len(b['dates'])
+    # 今日提示随图表包带出（前端只画提示价位线，不画任何成交标记）
+    assert isinstance(b['tip'], dict)
+    assert not ({'buys', 'sells', 'orders', 'positions'} & set(b))
     # 交易类字段一个都不许留（图上不再标买卖点）
     for gone in ('buys', 'sells', 'n_trades', 'pnl', 'marks'):
         assert gone not in b, gone
@@ -131,10 +151,11 @@ def test_chart_bundle_caps_bars_and_skips_missing_data():
 
 
 def test_kline_payload_windows_and_carries_snapshot():
-    """详情页K线：窗口内日期/波段/切换点必须对齐，并带今日三态快照"""
+    """详情页K线：窗口内日期/波段/切换点必须对齐，并带今日三态快照与今日提示"""
     p = web._kline_payload(SWING_DF, CFGW, n=120, code='000001')
     assert len(p['dates']) == 120 and len(p['k']) == 120
     assert p['code'] == '000001' and p['regime']['kind'] == regime.BEAR
+    assert isinstance(p['tip'], dict)               # 空头段：提示层给“停手”或空包，绝不出买卖价位
     dates = set(p['dates'])
     for a in p['areas']:
         assert a['x0'] in dates and a['x1'] in dates and a['x0'] <= a['x1']
@@ -162,7 +183,7 @@ def test_regime_segs_match_chart_window():
 
 
 def test_cfg_from_form_only_touches_regime_keys():
-    """表单里的三态参数覆盖到配置：整数键取整、非法值忽略、其它配置不动"""
+    """表单里的三态/提示参数覆盖到配置：整数键取整、非法值忽略、其它配置不动"""
     got = web._cfg_from_form({'ma_slow': '50', 'slope_min': '0.35',
                               'confirm_days': '4', 'ma_fast': 'x',
                               'capital': '999'}, CFGW)
@@ -171,6 +192,15 @@ def test_cfg_from_form_only_touches_regime_keys():
     assert abs(r['slope_min'] - 0.35) < 1e-9
     assert r['ma_fast'] == CFGW['regime']['ma_fast']    # 非法值不改
     assert 'capital' not in got                          # 交易参数根本不认
+    # 没提交提示区 = 原提示配置（不被三态表单改写）
+    assert got['t_trade'] == CFGW['t_trade']
+    # 提示区提交：浮点键留小数、max_hold 取整、开关跟随复选框
+    t2 = web._cfg_from_form({'buy_pctb': '0.15', 'max_hold': '7.6', 'stop_pct': 'bad',
+                             't_trade_enabled': 'on'}, CFGW)['t_trade']
+    assert abs(t2['buy_pctb'] - 0.15) < 1e-9 and t2['max_hold'] == 7
+    assert t2['stop_pct'] == TTW['stop_pct'] and t2['enabled'] is True
+    # 带了提示区但没勾开关 → 本次查询不附提示
+    assert web._cfg_from_form({'t_trade_present': '1'}, CFGW)['t_trade']['enabled'] is False
     # 空表单 = 原配置
     assert web._cfg_from_form({}, CFGW)['regime'] == CFGW['regime']
 
@@ -196,7 +226,7 @@ def _read(path):
 
 
 def test_webhook_only_save_keeps_other_params(iso_cfg):
-    """只保存 Webhook 不能顺手把三态与自动运行参数清空（表单带隐藏字段回传）"""
+    """只保存 Webhook 不能顺手把三态/提示与自动运行参数清空（表单带隐藏字段回传）"""
     c = web.app.test_client()
     r = c.post('/settings', data={'regime_present': '1', 'auto_run_present': '1',
                                   'ma_fast': '5', 'ma_slow': '60', 'slope_min': '0.1',
@@ -211,6 +241,7 @@ def test_webhook_only_save_keeps_other_params(iso_cfg):
     assert saved['feishu_webhook'] == 'http://hook'
     assert saved['regime'] == {'ma_fast': 5, 'ma_slow': 60, 'slope_min': 0.1,
                                'adx_min': 22.0, 'confirm_days': 5, 'spike_days': 4}
+    assert saved['t_trade'] == cfg_mod.DEFAULT_CONFIG['t_trade']   # 提示区未提交 → 原值不动
 
 
 def test_settings_form_persists_regime_params(iso_cfg):
@@ -237,11 +268,36 @@ def test_settings_form_persists_regime_params(iso_cfg):
         assert gone not in page, gone
 
 
+def test_settings_form_persists_t_trade_params(iso_cfg):
+    """提示层参数落盘：%B 上下沿/硬止损/最长持有日存得下（它们是纪律参数，不是交易参数），
+    未勾开关时 enabled=False；只改提示区不能顺手把三态参数洗掉。"""
+    c = web.app.test_client()
+    c.post('/settings', data={'regime_present': '1', 't_trade_present': '1',
+                              'ma_fast': '5', 'ma_slow': '60', 'slope_min': '0.3',
+                              'adx_min': '25', 'confirm_days': '3', 'spike_days': '3',
+                              'buy_pctb': '0.15', 'sell_pctb': '0.85', 'stop_pct': '4.5',
+                              'max_hold': '10.8', 'pb_touch': '2', 'vol_shrink': '0.75'})
+    saved = _read(iso_cfg)
+    tt = saved['t_trade']
+    assert abs(tt['buy_pctb'] - 0.15) < 1e-9 and abs(tt['sell_pctb'] - 0.85) < 1e-9
+    assert abs(tt['stop_pct'] - 4.5) < 1e-9 and tt['max_hold'] == 10    # 天数取整
+    assert abs(tt['pb_touch'] - 2.0) < 1e-9 and abs(tt['vol_shrink'] - 0.75) < 1e-9
+    assert tt['enabled'] is False                     # 提交了提示区但没勾开关
+    assert saved['regime']['ma_slow'] == 60           # 同一次提交里三态参数不丢
+    page = c.get('/settings').get_data(as_text=True)
+    assert 'value="0.15"' in page and 'value="4.5"' in page and 'value="10"' in page
+    assert 'name="buy_pctb"' in page and 'name="t_trade_enabled"' in page
+    # 重新勾上开关 → 能存回 True
+    c.post('/settings', data={'t_trade_present': '1', 't_trade_enabled': 'on'})
+    assert _read(iso_cfg)['t_trade']['enabled'] is True
+
+
 def test_settings_page_drops_unknown_regime_keys(iso_cfg):
     """嵌套段只认 DEFAULT_CONFIG 已知的键，脏键写不进去"""
     c = web.app.test_client()
     c.post('/settings', data={'regime_present': '1', 'ma_slow': '40'})
     assert set(_read(iso_cfg)['regime']) == set(cfg_mod.DEFAULT_CONFIG['regime'])
+    assert set(_read(iso_cfg)['t_trade']) == set(cfg_mod.DEFAULT_CONFIG['t_trade'])
 
 
 def test_backtest_alias_redirects_to_market():
@@ -250,19 +306,25 @@ def test_backtest_alias_redirects_to_market():
 
 
 def test_market_page_get_has_only_recognition_controls(iso_cfg):
-    """行情页护栏：只有日期/标的/三态参数，没有交易控件，数据区也没有模式与买卖字样"""
+    """行情页护栏：只有日期/标的/三态与提示参数，没有交易控件；数据区只说纪律不说交易口径"""
     page = web.app.test_client().get('/market').get_data(as_text=True)
     assert 'name="codes"' in page and 'name="ma_slow"' in page
     assert 'name="slope_min"' in page and 'name="confirm_days"' in page
     assert 'name="adx_min"' in page and 'name="spike_days"' in page
     assert 'name="refresh_data"' in page
+    # 提示层参数区（需求：震荡段做T的四个纪律阈值可现场调）
+    assert 'name="t_trade_present"' in page and 'name="t_trade_enabled"' in page
+    for k in ('buy_pctb', 'sell_pctb', 'stop_pct', 'max_hold', 'pb_touch', 'vol_shrink'):
+        assert 'name="%s"' % k in page, k
     for gone in ('bt_mode', 'fixed_t_amount', 'cost_rate', 'capital', 'sl_atr',
                  'tp_atr', 'min_votes', 'levels', 'grid_step_atr', 'sizing_mode',
                  'enable_base_filter', 'pos_frac'):
         assert gone not in page, gone
     for word in FORBIDDEN:
         assert word not in strip_rules(page), word
-    assert page.count('<label title="') >= 6        # 参数必须可悬停看解释
+    assert page.count('<label title="') >= 12       # 三态 + 提示参数共 12 项可悬停看解释
+    for w in TIP_WORDS:
+        assert w in strip_rules(page), w            # 纪律原文得在页上写清楚
 
 
 def test_stocks_page_is_code_and_name_only(iso_cfg, tmp_path, monkeypatch):
@@ -306,26 +368,49 @@ def _snap(**over):
 
 
 def test_index_template_eats_missing_metrics():
-    """仪表盘必须能吃下“数据失败 / 指标为 None / 无三态”的行：缺数据显示 '-'，不抛 TypeError"""
+    """仪表盘必须能吃下“数据失败 / 指标为 None / 无三态 / 无提示”的行：缺数据显示 '-'，不抛 TypeError"""
     results = [
         {'code': '600741', 'name': '华域汽车', 'status': '正常', 'reason': '',
          'date': '2026-10-19', 'close': 15.5, 'chg_pct': 0.8, 'adx': 28.0,
          'ind': {'ma20': 15.2, 'ma60': 14.6, 'slope5': 0.42, 'adx': 28.0, 'rsi': 55.0,
                  'bb_width': 8.0, 'amp20': 1.8, 'vol_ratio': 1.2, 'turnover': 0.6,
                  'boll_low': 14.4, 'boll_up': 16.0},
-         'regime': _snap()},
+         # 多头段：给回踩介入提示（带最高风险）
+         'regime': _snap(),
+         'tip': _tip(action='watch', mark='🟠', kind='bull', level_cn='多头',
+                     action_cn='介入提示｜回踩 MA20 + 缩量止跌',
+                     reason='最低 15.02 踩到 MA20 15.20 · 量比 0.70× 缩量 · 收盘站上前收',
+                     ma20=15.2, vol_ratio=0.7, stop_price=None, entry_date=None,
+                     entry_close=None, hold_days=0, left_days=None,
+                     risk='最高风险｜趋势段做区间介入历史有效性最差，破 MA20 当场失效')},
+        {'code': '600585', 'name': '海螺水泥', 'status': '正常', 'reason': '',
+         'date': '2026-10-19', 'close': 26.0, 'chg_pct': -0.6, 'adx': 16.0,
+         'ind': {'ma20': 26.1, 'pctb': 0.08, 'bb_width': 6.0, 'amp20': 1.2,
+                 'vol_ratio': 0.9, 'slope5': -0.05, 'boll_low': 25.4, 'boll_up': 26.9},
+         # 震荡段：%B 到下沿 → 买入提示 + 硬止损位 + 持有天数
+         'regime': _snap(kind=regime.RANGE, label_cn='震荡', level_cn='震荡',
+                         strong=False, desc=regime.DESC_CN[regime.RANGE],
+                         color=regime.COLOR[regime.RANGE], fill=regime.FILL[regime.RANGE],
+                         changed=False, prev=regime.RANGE, prev_label_cn='震荡',
+                         grade=None, pending='', pending_label_cn='', pending_days=0),
+         'tip': _tip(pctb=0.08, stop_price=14.6, entry_date='2026-10-19',
+                     entry_close=15.35, hold_days=1, left_days=14)},
         {'code': '601318', 'name': '中国平安', 'status': '数据失败', 'reason': '下载超时',
          'date': None, 'close': None, 'chg_pct': None, 'adx': None, 'ind': None,
          'regime': None},
         {'code': '600887', 'name': '伊利股份', 'status': '均线未就绪', 'reason': '慢线还没算出来',
          'date': '2026-10-19', 'close': 27.7, 'chg_pct': None, 'adx': None,
          'ind': {'bb_width': None, 'vol_ratio': None, 'slope5': None},
+         # 没三态就没提示：提示列退回“—”
+         'tip': None,
          'regime': _snap(kind=regime.UNKNOWN, label_cn='数据不足',
                          desc=regime.DESC_CN[regime.UNKNOWN])},
     ]
     trend = {'rows': [], 'changed': [], 'strong_changed': [], 'momentum_changed': [],
+             'tips': [], 'holds': [], 'n_tip': 2, 'n_tip_buy': 1, 'n_tip_sell': 0,
+             'n_tip_stop': 0, 'n_tip_watch': 1,
              'pending': [], 'quiet': [],
-             'n_bull': 1, 'n_bear': 0, 'n_range': 0, 'n_rows': 1, 'n_strong_rows': 1,
+             'n_bull': 1, 'n_bear': 0, 'n_range': 1, 'n_rows': 2, 'n_strong_rows': 1,
              'date': '2026-10-19'}
     with web.app.test_request_context('/'):
         page = web.render_template('index.html', results=results, cfg=CFGW, trend=trend)
@@ -334,21 +419,35 @@ def test_index_template_eats_missing_metrics():
     assert '今日切换：震荡 → 多头' in page and '酝酿空头 2/5 日' in page
     assert 'ADX' in page and '区间位置 %B' in page      # 强档门槛与震荡定位都得上页
     assert '带宽 -%' in page and '-×' in page
-    assert page.count('<col style=') == page.count('<th>') == 11
+    assert page.count('<col style=') == page.count('<th>') == 12   # 12 列：多了“提示”列
     assert RULES_HEAD in page                        # 需求：判定规则与运行机制要在页面标明
     for word in FORBIDDEN:
         assert word not in strip_rules(page), word
-    assert '不产生任何买卖指令' in page            # 页面自己把边界说清楚
+    assert '不给仓位金额、不接管下单' in page         # 页面自己把两层边界说清楚
+    # 🎯 提示条：只数跟 scan 的汇总一致，没发生的动作不占位
+    assert '🎯 今日提示 2 只' in page
+    assert '🟢 买入 1' in page and '🟠 多头回踩 1' in page
+    data_area = strip_rules(page)          # 页底会把全部动作枚举一遍，这里只查“零计数”的标签
+    assert '🔺 卖出 0' not in page and '🛑 止损/回避 0' not in page
+    # 提示列内容：动作 + 理由 + %B 阈值 + 硬止损位 + 第几天 + 最高风险
+    assert '🟢 买入提示' in page and '🟠 介入提示' in page
+    assert '硬止损位' in page and '14.60' in page
+    assert '第 <b>1</b>/15 日' in page and '余 14 日' in page
+    assert '买 ≤0.1 / 卖 ≥0.9' in page
+    assert '⚠️ 最高风险' in page
+    assert '趋势段停手' in data_area              # 第一纪律直接写在页面数据区
+    assert '提示层已关闭' not in data_area
 
 
 def test_detail_template_renders_wave_table_without_signals():
-    """详情页：今日趋势 + 图上波段明细 + 因子快照，不含任何信号/网格/漏斗卡片"""
+    """详情页：今日趋势 + 今日提示 + 图上波段明细 + 因子快照，不含任何信号/网格/漏斗卡片"""
     segs = web._regime_segs(SWING_DF, CFGW, 250)
     ctx = {'st': {'code': '000001', 'name': '测试股'},
            'df': SWING_DF.tail(160).reset_index(drop=True),
            'ind': ind.snapshot(SWING_DF.iloc[-1]),
            'rgsnap': regime.snapshot(SWING_DF, CFGW),
            'rsegs': segs,
+           'tip': _tip(t_buy_px=15.05, t_sell_px=16.28),
            'k_json': '{"dates": [], "k": []}'}
     with web.app.test_request_context('/stock/000001'):
         page = web.render_template('detail.html', **ctx)
@@ -356,13 +455,39 @@ def test_detail_template_renders_wave_table_without_signals():
     assert '图上波段明细' in page and '今日趋势' in page
     assert '近20日明细' in page and '今日盘面快照' in page
     assert 'renderKChart' in page
+    # 今日提示卡：动作 + 理由 + 上下沿价位 + 硬止损位 + 提示买入日 + 纪律原文
+    assert '今日提示' in page and '🟢 买入提示' in page
+    assert '下沿 / 上沿价位' in page and '15.05 / 16.28' in page
+    assert '硬止损位（−5.0%）' in page and '14.60' in page
+    assert '提示买入日 / 当日收盘' in page and '2026-10-19' in page
+    assert '持有进度' in page and '第 1/15 日' in page
+    assert '止损回避' in page and '趋势段停手' in page
     for gone in ('闸门漏斗', '网格档位', '买点提醒', '投票', '明日动作', '适用模式'):
         assert gone not in page, gone
     for word in FORBIDDEN:
         assert word not in strip_rules(page), word
     assert RULES_HEAD in page and '段内强日' in page
     assert 'ADX(14)' in page and '区间位置 %B' in page
+    assert '不给仓位金额、不接管下单' in page
     assert page.count('<colgroup>') == 2             # 图上波段表 + 近20日表
+
+
+def test_detail_template_without_tip_or_with_tips_off():
+    """提示卡的两个退路：无三态/无提示时不能编造价位；提示层关掉时要引导去设置页打开"""
+    base = {'st': {'code': '000001', 'name': '测试股'},
+            'df': SWING_DF.tail(160).reset_index(drop=True),
+            'ind': ind.snapshot(SWING_DF.iloc[-1]),
+            'rgsnap': regime.snapshot(SWING_DF, CFGW),
+            'rsegs': web._regime_segs(SWING_DF, CFGW, 250),
+            'k_json': '{}'}
+    off = dict(base, tip={})
+    with web.app.test_request_context('/stock/000001'):
+        page = web.render_template('detail.html', **off)
+    assert '今日提示' not in page                       # 没提示就不卡不编价位
+    cfg_off = dict(CFGW, t_trade=dict(CFGW['t_trade'], enabled=False))
+    with web.app.test_request_context('/stock/000001'):
+        gone = web.render_template('detail.html', cfg=cfg_off, **off)
+    assert '提示层已在' in gone and '设置页' in gone
 
 
 def test_market_template_renders_charts_and_stats():
@@ -373,8 +498,12 @@ def test_market_template_renders_charts_and_stats():
     with web.app.test_request_context('/market', method='POST'):
         page = web.render_template('market.html', stocks=STOCK, form={}, cfg=CFGW,
                                    charts=charts, stats=stats, sel_codes={'000001'},
-                                   start=D[0], end='2099-12-31', rg=CFGW['regime'])
+                                   start=D[0], end='2099-12-31', rg=CFGW['regime'],
+                                   tt=CFGW['t_trade'])
     assert 'id="k-000001"' in page and 'mkt-data' in page
+    # 图头带今日提示标签（这段历史末端是空头段 → ⛔ 趋势段停手）
+    assert '⛔ 趋势段停手' in page
+    assert '震荡段做T提示参数' in page and 'name="buy_pctb"' in page
     assert '区间三态构成' in page and '波段性格统计' in page and '波段明细' in page
     assert '多头天' in page and '震荡占比' in page
     assert '强档天' in page and '段内强日' in page      # 强/弱两档在区间统计里可见
@@ -399,6 +528,19 @@ def test_rules_block_is_stated_with_current_params(iso_cfg):
         assert '震荡做T的第一纪律' in page and '趋势段停手' in page
         assert '15:35' in page                      # 盘后自动重跑时刻
         assert 'BOLL(20,2) 不参与三态判定' in page
+        # 需求 v3.2：提示层规则也要在页上声明，且用的就是 cfg.t_trade 里的当前值
+        tt = CFGW['t_trade']
+        assert '四、震荡段做T提示' in page, path
+        assert ('%%B ≤ <b>%s</b>' % tt['buy_pctb']) in page, path
+        assert ('%%B ≥ <b>%s</b>' % tt['sell_pctb']) in page, path
+        assert ('−<b>%s%%</b>' % tt['stop_pct']) in page, path
+        assert ('已持满 <b>%s</b> 个交易日' % tt['max_hold']) in page, path
+        assert ('最低价距均线 %s%% 内' % tt['pb_touch']) in page, path
+        assert ('量比 &lt; %s×' % tt['vol_shrink']) in page, path
+        assert '三条缺一不提示' in page and '最高风险' in page, path
+        assert '提示层开关' in page and '已开启' in page, path
+        for w in TIP_WORDS:
+            assert w in page, (path, w)
 
 
 # ---------- 需求文档渲染 ----------
@@ -473,8 +615,12 @@ def test_nav_has_no_trading_pages():
     assert 'href="/market"' in page and 'href="/optimize"' not in page
     assert 'href="/backtest"' not in page
     data_only = strip_rules(page)
-    for word in ('买入', '卖出', '模式B', '模式C', '做T'):
+    for word in FORBIDDEN:
         assert word not in data_only, word
+    # 提示层作为“纪律参数”回到了页面上（不再是旧一轮的“只报三态”）
+    assert '震荡段做T提示' in data_only and 'name="t_trade_present"' in page
+    for w in TIP_WORDS:
+        assert w in data_only, w
 
 
 @pytest.mark.parametrize('path', ['/settings', '/stocks', '/market', '/doc'])

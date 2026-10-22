@@ -21,7 +21,7 @@ _lock = threading.Lock()
 _thread_lock = threading.Lock()
 _thread = None
 _stop = threading.Event()
-TITLE = '趋势播报｜多头/空头/震荡 每日识别 + 趋势变化提醒（只做行情识别，不产生交易指令）'
+TITLE = '趋势播报｜三态识别 + 切换分级提醒 + 区间做T纪律提示（只提示，不接管下单）'
 
 
 # ---------- 状态读写 ----------
@@ -125,11 +125,12 @@ def run_once(cfg=None, force=False, manual=False):
         ok = res.get('code') == 0
         pushed = ok and res.get('msg') != 'dry_run'
         # 摘要里带上分级计数：页面/日志一眼能看出今天有没有强信号
-        summary = ('趋势 多头%d/空头%d/震荡%d（今日变化 %d 只：🔴🔴 %d / 🟡 %d；酝酿 %d 只）'
+        summary = ('趋势 多头%d/空头%d/震荡%d（今日变化 %d 只：🔴🔴 %d / 🟡 %d；酝酿 %d 只；提示 %d 只）'
                    '/ 未判定 %d 只 / 数据日期 %s / 通道 %s / code=%s %s' % (
             trend['n_bull'], trend['n_bear'], trend['n_range'],
             len(trend['changed']), len(trend['strong_changed']),
             len(trend['momentum_changed']), len(trend['pending']),
+            len(trend.get('tips') or []),
             len(trend['quiet']), data_date,
             res.get('channel', '-'), res.get('code'), res.get('msg')))
         state.update(last_run_date=today, last_result='成功' if ok else '失败',
@@ -138,6 +139,7 @@ def run_once(cfg=None, force=False, manual=False):
                      last_trend_changed=[x['name'] for x in trend['changed']],
                      last_strong_flips=len(trend['strong_changed']),
                      last_momentum_flips=len(trend['momentum_changed']),
+                     last_tips=len(trend.get('tips') or []),
                      last_data_date=data_date,
                      last_pushed=pushed,
                      last_run_at=started.strftime('%Y-%m-%d %H:%M:%S'))

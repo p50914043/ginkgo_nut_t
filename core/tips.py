@@ -27,7 +27,7 @@ KEYS = tuple(DEF)
 ACTION_CN = {
     'buy': '买入提示｜%B 已到区间下沿',
     'sell': '卖出提示｜%B 已到区间上沿',
-    'stop': '止损提示｜跌破 −5% 硬止损位',
+    'stop': '止损提示｜已到硬止损位',
     'expire': '超期提示｜最长持有日数已到',
     'hold': '持仓提示｜区间内做T进行中',
     'wait': '等待提示｜区间内未到下沿',
@@ -37,7 +37,7 @@ ACTION_CN = {
     'off': '趋势段停手｜本段不是震荡，不给区间提示',
 }
 MARK = {'buy': '🟢', 'sell': '🔺', 'stop': '🛑', 'expire': '⌛', 'hold': '🔵',
-        'wait': '⚪', 'avoid': '🛑', 'watch': '🟠', 'off': '⛔'}
+        'wait': '⚪', 'avoid': '🛑', 'watch': '🟠', 'bull_wait': '⚪', 'off': '⛔'}
 
 
 def tcfg(cfg):
@@ -195,7 +195,7 @@ def bull_watch(df, snap, t=None):
                     reason='最低 %.2f 踩到 MA20 %.2f · 量比 %.2f× 缩量 · 收盘站上前收' % (
                         low[i], ma20[i], vol_ratio[i]),
                     risk='最高风险｜趋势段做区间介入历史有效性最差，破 MA20 当场失效')
-    return dict(base, action='bull_wait', mark=MARK['wait'],
+    return dict(base, action='bull_wait', mark=MARK['bull_wait'],
                 action_cn=ACTION_CN['bull_wait'],
                 reason='回踩介入条件未凑满：' + '、'.join(need), need=need)
 

@@ -1,14 +1,15 @@
 {#
   判定规则与运行机制（全站统一说明块）
-  口径来源：core/regime.py（三态判据/强弱/滞回/毛刺/分级）+ core/scan.py（实测统计）
-           + core/autorun.py（盘后运行）+ core/notifier.py（播报）
+  口径来源：core/regime.py（三态判据/强弱/滞回/毛刺/分级）+ core/tips.py（震荡段做T与多头回踩提示）
+           + core/scan.py（实测统计）+ core/autorun.py（盘后运行）+ core/notifier.py（播报）
   这里只读现成参数与状态渲染，不另写一套规则，避免页面与引擎口径漂移。
   用法：index.html 展开；detail/market 页先 {% set rules_mode = 'fold' %} 再 include。
   注意：块内不使用 <table>/<colgroup>/<th>，防止打破各页面对表格结构的断言。
-  标记说明：RULES-BEGIN/END 之间是“规则披露区”，允许出现历史统计与区间定位用词；
+  标记说明：RULES-BEGIN/END 之间是“规则披露区”，允许出现历史统计、区间定位与做T纪律用词；
            测试的整页禁用词护栏只扫描这个区间之外的数据区（逐票行、推送文案）。
 #}
 {% set rgp = cfg.regime %}
+{% set ttp = cfg.t_trade %}
 {% set rmode = rules_mode | default('open') %}
 <!--RULES-BEGIN-->
 {% macro rules_body() %}
@@ -38,10 +39,10 @@
       <li><b>强 / 弱两档</b>：四条全满足 = 强；只满足“收盘在 MA20 一侧 + 斜率同向” = 弱（三态不变，标签写作<b>弱多头 / 弱空头</b>）。</li>
       <li><b>波段标注</b>：K 线背景色块 = 生效状态的连续段，<b>◆</b> = 趋势切换确认那天；段内涨跌取段首末收盘，高低取段内极值。</li>
       <li><b>BOLL(20,2) 不参与三态判定</b>，只用于震荡段的区间定位：<code>%B = (收盘 − 下轨) / (上轨 − 下轨)</code>，
-        0 靠下轨、1 靠上轨；仪表盘与详情页的“区间位置”列就是它。<b>震荡做T的第一纪律：趋势段停手</b>
-        ——历史实证（7 只大盘股、2.1 年）：只在震荡段内 %B≤0.10 买 / %B≥0.90 卖、最长持 15 日、5% 止损，
+        0 靠下轨、1 靠上轨；仪表盘与详情页的“区间位置”列就是它。
+        <b>震荡做T的第一纪律：趋势段停手</b> ——历史实证（7 只大盘股、2.1 年）：只在震荡段内 %B≤0.10 买 / %B≥0.90 卖、最长持 15 日、5% 止损，
         27 笔胜率 70%、均净 +1.68%；同样的信号放在趋势段只有 52% 胜率、均净 +0.28%。
-        本工具已删除交易层，不再重跑这套账，上面数字是历史结论的引用，页面只提供 %B 定位。</li>
+        本工具<b>不重跑这套账</b>（上面数字是历史结论的引用），只按这套纪律在震荡段给提示，见下面第四节。</li>
     </ul>
   </div>
 
@@ -94,8 +95,8 @@
       <li><b>交易日保护</b>：最新数据日期不等于当天（节假日、数据源滞后）就跳过推送；是否重试由设置页开关决定。</li>
       <li><b>若发生趋势切换</b>，按上面的分级推送：<b>🔴🔴 强信号</b>单独成节排在最前，<b>🟡 动能变化</b>随后，
         ⏳ 酝酿中只报进度。</li>
-      <li><b>简报固定内容</b>：趋势计数（含强趋势只数）→ 逐只（收盘 / 涨跌幅 / 三态强弱 / 本波段起始日与第几日 /
-        MA20 与慢线与斜率 / ADX，震荡段附加 %B）→ 分级切换 → 酝酿中 → 未纳入判定。</li>
+      <li><b>简报固定内容</b>：趋势计数（含强趋势只数与 🎯 提示只数）→ 逐只（收盘 / 涨跌幅 / 三态强弱 / 本波段起始日与第几日 /
+        MA20 与慢线与斜率 / ADX，震荡段附加 %B）→ 分级切换 → 🎯 提示与 🔵 区间持仓中 → 酝酿中 → 未纳入判定。</li>
       <li><b>手动入口</b>：本页“更新数据并重新扫描 / 发送飞书播报 / 立即运行一次”，dry 预览只生成文本不发送。</li>
       <li><b>参数生效范围</b>：<a href="/settings">设置页</a>保存即全局生效并落盘 <code>config.yaml</code>；
         <a href="/market">行情波段页</a>现场填的参数只影响本次查询，不落盘。实测分级统计随参数一起变。</li>
@@ -103,10 +104,44 @@
         日志 <code>autorun.log</code>，最近状态 <code>data/autorun_state.json</code>，自动运行需保持服务在跑（<code>run.sh</code>）。</li>
     </ul>
   </div>
+
+  <div>
+    <h3 style="font-size:14px;margin:6px 0 8px">四、震荡段做T提示（第一纪律：趋势段停手）</h3>
+    <div class="pgrid" style="grid-template-columns:1fr">
+      <div class="prow"><span><b>🎯 提示层开关</b></span>
+        <span class="pv">{{ '已开启' if ttp.enabled else '已关闭' }}</span></div>
+      <div class="prow"><span><b>🟢 买入提示</b>　震荡段内 %B ≤ <b>{{ ttp.buy_pctb }}</b>（靠布林下轨）</span>
+        <span class="ptag">同时开一笔段内跟踪，止损位 = 当日收盘 −{{ ttp.stop_pct }}%</span></div>
+      <div class="prow"><span><b>🔺 卖出提示</b>　持仓中 %B ≥ <b>{{ ttp.sell_pctb }}</b>（靠布林上轨）</span>
+        <span class="ptag">区间单到上沿就走</span></div>
+      <div class="prow"><span><b>🛑 硬止损</b>　段内最低价碰到提示买入当日收盘的 −<b>{{ ttp.stop_pct }}%</b> 位</span>
+        <span class="ptag">优先级最高，不看当时情绪</span></div>
+      <div class="prow"><span><b>⌛ 超期提示</b>　已持满 <b>{{ ttp.max_hold }}</b> 个交易日还没到上沿</span>
+        <span class="ptag">不让区间单变成长线</span></div>
+      <div class="prow"><span><b>🔵 持仓中 / ⚪ 等待</b>　段内已触发下沿但未到上沿 / 还没触发</span>
+        <span class="ptag">只是状态描述，不算动作</span></div>
+      <div class="prow"><span><b>🛑 止损回避</b>　本日确认切换 <b>震荡 → 空头</b></span>
+        <span class="ptag">下沿买入逻辑当场失效，优先级高于区间提示本身</span></div>
+      <div class="prow"><span><b>🟠 多头回踩介入</b>　回踩 MA20（最低价距均线 {{ ttp.pb_touch }}% 内）
+          + 缩量（量比 &lt; {{ ttp.vol_shrink }}×）+ 收盘止跌，<b>三条缺一不提示</b></span>
+        <span class="ptag">附<b>最高风险</b>警示；未凑满记 ⚪ 介入观察并列出缺项</span></div>
+      <div class="prow"><span><b>⛔ 趋势段停手</b>　空头段、未成形的震荡段、三态不是震荡的所有日子</span>
+        <span class="ptag">一律不给区间提示</span></div>
+    </div>
+    <ul class="muted" style="margin:10px 0 0;padding-left:20px;line-height:1.8">
+      <li><b>提示只跟着判定层走</b>：先定三态，再在生效状态的波段内回放纪律（段边界就是图上色块的起止），<b>提示不会反向修正三态</b>。</li>
+      <li><b>同时命中时按优先级取一个</b>：止损 &gt; 上沿卖出 &gt; 超期离场。</li>
+      <li><b>“段内持仓回放”不记账</b>：它只用来回答“今天该提示买入、卖出还是止损”，<b>不产出历史业绩、不算收益与胜率</b>。</li>
+      <li><b>不给仓位金额</b>：提示只给动作、%B、关键价位与持有天数，不给买多少、多少钱，也<b>不对接任何下单接口</b>。</li>
+      <li><b>多头回踩是最高风险项</b>：趋势段里做区间介入历史有效性最差，破 MA20 当场失效，因此必须带风险警示。</li>
+      <li><b>参数入口</b>：<a href="/settings">设置页</a>的“震荡段做T提示”（关闭后页面与推送只报三态与分级）。</li>
+    </ul>
+  </div>
 </div>
 <p class="muted" style="margin:12px 0 0;border-top:1px dashed var(--line);padding-top:8px">
-  <b>边界</b>：本工具只做行情识别 —— 不给个股点位与仓位建议、不做收益承诺、不对接任何交易接口；
-  上面所有统计都是历史行情的描述。ADX / RSI / 带宽 / 振幅 / 量能 / %B 只是盘面参考。
+  <b>边界</b>：本工具分两层。<b>判定层</b>只回答“现在是多头 / 空头 / 震荡”；<b>提示层</b>只在已判定的震荡段按上面第四节给区间纪律提醒（动作 + %B + 关键价位 + 持有天数），
+  在多头段给“回踩 + 缩量 + 止跌”的介入提醒并标最高风险。<b>两层都不给仓位金额、不算收益与胜率、不对接任何交易接口</b>；
+  上面所有统计都是历史行情的描述，ADX / RSI / 带宽 / 振幅 / 量能 / %B 只是盘面参考。
   权威原文见 <a href="/doc">需求文档</a>（第 2、3 节）。
 </p>
 {% endmacro %}
@@ -121,7 +156,7 @@
 {% else %}
 <div class="card" id="rules">
   <h2>判定规则与运行机制
-    <span class="muted">（当前生效参数：MA20 × MA{{ rgp.ma_slow }} ±{{ rgp.slope_min }}% · ADX&gt;{{ rgp.adx_min|int }} · 滞回{{ rgp.confirm_days }}日 · 毛刺{{ rgp.spike_days }}日）</span></h2>
+    <span class="muted">（当前生效参数：MA20 × MA{{ rgp.ma_slow }} ±{{ rgp.slope_min }}% · ADX&gt;{{ rgp.adx_min|int }} · 滞回{{ rgp.confirm_days }}日 · 毛刺{{ rgp.spike_days }}日 · 提示层{{ '开' if ttp.enabled else '关' }}：%B≤{{ ttp.buy_pctb }}买 / ≥{{ ttp.sell_pctb }}卖 / −{{ ttp.stop_pct }}% / {{ ttp.max_hold }}日）</span></h2>
   {{ rules_body() }}
 </div>
 {% endif %}

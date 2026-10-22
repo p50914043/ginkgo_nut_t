@@ -2,7 +2,7 @@
 {% set active = 'home' %}
 {% block body %}
 <div class="card">
-  <h2>趋势仪表盘 <span class="muted">（盘后生成：只用均线识别多头 / 空头 / 震荡，并给出行情快照 · 不产生任何买卖指令）</span></h2>
+  <h2>趋势仪表盘 <span class="muted">（盘后生成：只用均线识别多头 / 空头 / 震荡，震荡段附做T纪律提示 · 不给仓位金额、不接管下单）</span></h2>
   <div class="form-inline" style="display:flex;gap:10px;margin-bottom:10px">
     <a class="btn pri" href="/?refresh=1">更新数据并重新扫描</a>
     <form method="post" action="/notify" class="inline">
@@ -39,18 +39,29 @@
       {% for x in trend.quiet %}{{ x.name }}（{{ x.status }}）{{ '、' if not loop.last }}{% endfor %}</span>{% endif %}
   </div>
   {% endif %}
+  {% if trend and trend.n_tip %}
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;padding:8px 12px;background:#fffdf5;border:1px solid var(--line);border-radius:8px">
+    <b>🎯 今日提示 {{ trend.n_tip }} 只</b>
+    {% if trend.n_tip_buy %}<span class="tag tp-buy">🟢 买入 {{ trend.n_tip_buy }}</span>{% endif %}
+    {% if trend.n_tip_sell %}<span class="tag tp-sell">🔺 卖出 {{ trend.n_tip_sell }}</span>{% endif %}
+    {% if trend.n_tip_stop %}<span class="tag tp-stop">🛑 止损/回避 {{ trend.n_tip_stop }}</span>{% endif %}
+    {% if trend.n_tip_watch %}<span class="tag tp-watch">🟠 多头回踩 {{ trend.n_tip_watch }}</span>{% endif %}
+    <span class="muted">第一纪律<b>趋势段停手</b>：只在判定为震荡的波段里给 %B 上下沿与硬止损提示（{{ cfg.t_trade.buy_pctb }} / {{ cfg.t_trade.sell_pctb }} / −{{ cfg.t_trade.stop_pct }}% / 最长 {{ cfg.t_trade.max_hold }} 日）</span>
+  </div>
+  {% endif %}
   <div class="tblwrap">
   <table class="fit wide">
     <colgroup>
-      <col style="width:7%"><col style="width:6.5%"><col style="width:11%"><col style="width:12%">
-      <col style="width:14%"><col style="width:4.5%"><col style="width:5%"><col style="width:10%">
-      <col style="width:6%"><col style="width:6%"><col style="width:11%">
+      <col style="width:7%"><col style="width:6%"><col style="width:10%"><col style="width:15%">
+      <col style="width:10%"><col style="width:12%"><col style="width:4.5%"><col style="width:4.5%">
+      <col style="width:8.5%"><col style="width:5.5%"><col style="width:7%"><col style="width:10%">
     </colgroup>
-    <tr><th>股票</th><th>现价 / 涨跌</th><th>三态（均线）</th><th>本波段</th>
+    <tr><th>股票</th><th>现价 / 涨跌</th><th>三态（均线）</th><th>提示</th><th>本波段</th>
         <th>均线判据</th><th>ADX</th><th>RSI</th><th>波动结构</th><th>量能</th><th>数据日</th><th>状态</th></tr>
     {% for r in results %}
     {% set rg = r.regime or {} %}
     {% set ind = r.ind or {} %}
+    {% set tp = r.tip or {} %}
     <tr>
       <td class="nw"><a href="/stock/{{ r.code }}" style="color:var(--blue);text-decoration:none">{{ r.name }}</a>
           <div class="muted">{{ r.code }}</div></td>
@@ -64,6 +75,20 @@
         {% if rg.changed %}<div><span class="tag rg-chg" title="上一态：{{ rg.prev_label_cn }}">{{ (rg.grade or {}).get('mark', '🔔') }} 今日切换：{{ rg.prev_label_cn }} → {{ rg.label_cn }}</span></div>{% endif %}
         {% if rg.pending %}<div class="why-hint">⏳ 酝酿{{ rg.pending_label_cn }} {{ rg.pending_days }}/{{ rg.confirm_days }} 日</div>{% endif %}
         {% else %}<span class="tag bad">{{ regime_cn.get(rg.get('kind'), '数据不足') }}</span>{% endif %}
+      </td>
+      <td>
+        {% if tp.get('action') %}
+        {% set tpcls = {'buy':'tp-buy','sell':'tp-sell','stop':'tp-stop','expire':'tp-stop',
+                        'avoid':'tp-stop','watch':'tp-watch','hold':'tp-hold',
+                        'wait':'tp-wait','bull_wait':'tp-wait','off':'tp-off'} %}
+        <span class="tag {{ tpcls.get(tp.action, 'tp-off') }}" title="{{ tp.action_cn }}｜生效三态 {{ tp.level_cn }}">{{ tp.mark }} {{ tp.action_cn.split('｜')[0] }}</span>
+        <div class="kv">{{ tp.reason }}</div>
+        {% if tp.pctb is not none and tp.kind == 'range' %}<div class="kv">区间位置 %B <b>{{ tp.pctb|num('%.2f') }}</b><span class="muted">（买 ≤{{ tp.buy_pctb }} / 卖 ≥{{ tp.sell_pctb }}）</span></div>{% endif %}
+        {% if tp.stop_price %}<div class="kv">硬止损位 <b>{{ tp.stop_price|num }}</b>{% if tp.entry_date %}<span class="muted">（{{ tp.entry_date }} 提示买入 {{ tp.entry_close|num }}）</span>{% endif %}</div>{% endif %}
+        {% if tp.hold_days %}<div class="kv">第 <b>{{ tp.hold_days }}</b>/{{ tp.max_hold }} 日{% if tp.left_days is not none %}<span class="muted"> · 余 {{ tp.left_days }} 日</span>{% endif %}</div>{% endif %}
+        {% if tp.need %}<div class="kv muted">还差：{{ tp.need|join('、') }}</div>{% endif %}
+        {% if tp.risk %}<div class="why-bad">⚠️ {{ tp.risk }}</div>{% endif %}
+        {% else %}{% if not cfg.t_trade.enabled %}<span class="muted">提示层已关闭</span>{% else %}<span class="muted">—</span>{% endif %}{% endif %}
       </td>
       <td>{% set sg = rg.segment or {} %}{% if sg.get('start') %}
         <div class="kv">起 <b>{{ sg.start }}</b> · 第 <b>{{ rg.days }}</b> 日{% if rg.n_segments %}（历史 {{ rg.n_segments }} 段）{% endif %}</div>
@@ -88,7 +113,7 @@
     {% endfor %}
   </table>
   </div>
-  <p class="muted"><b>本工具只做行情识别</b>：不给买卖点、不算仓位与收益、不接入任何交易接口。表里的 ADX / RSI / 带宽 / 振幅 / 量能只是盘面参考，用来帮你判断当前三态像不像话，不构成任何操作建议。趋势今天发生切换的标的会按分级标出（🔴🔴 强信号 / 🟡 动能变化），飞书推送里也会分级列出。</p>
+  <p class="muted"><b>本工具只做行情识别 + 区间纪律提示</b>：判定层只回答“现在是多头 / 空头 / 震荡”，提示层只在<b>震荡段</b>按 %B 上下沿与硬止损给纪律提醒，<b>不给仓位金额、不算收益胜率、不接入任何下单接口</b>。表里的 ADX / RSI / 带宽 / 振幅 / 量能只是盘面参考，不构成任何操作建议。趋势今天发生切换的标的会按分级标出（🔴🔴 强信号 / 🟡 动能变化），飞书推送里也会分级列出；提示动作（🟢 买入 / 🔺 卖出 / 🛑 止损回避 / 🟠 多头回踩）在推送里单独成节。</p>
   <p class="muted">点标的名进入详情页可看整段历史日K：背景色块是三态波段，<b>◆</b> 是趋势切换的那天。完整判定规则与运行机制见下面（权威原文在<a href="/doc">需求文档</a>）。</p>
 </div>
 {% include '_rules.html' %}

@@ -18,7 +18,7 @@
   </h2>
   <p class="muted">数据日 {{ rgsnap.date or ind.date or '-' }} · 收盘 <b>{{ ind.close|num }}</b>
     <span class="{{ 'pos' if (ind.chg_pct or 0)>=0 else 'neg' }}">{{ ind.chg_pct|chg }}</span> ·
-    本页面只做行情识别：不给买卖点、不算仓位与收益。</p>
+    本页面只做行情识别与区间纪律提示：不给仓位金额、不接管下单。</p>
   <div class="kchart4" id="kline"></div>
   <p class="muted">背景色块是三态波段：<span class="rb">多头</span> <span class="rg2">空头</span> <span class="gr">震荡</span>；
     <b>◆</b> 标在趋势变化的那天（悬停看分级与“旧态 → 新态”）。副图依次为量能 / ADX（虚线为强档门槛 {{ rgsnap.adx_min or cfg.regime.adx_min|int }}）/ MACD，悬停任意一天可看当日指标与“本波段第几天”。</p>
@@ -47,6 +47,32 @@
   </div>
   <p class="muted"><b>{{ rgsnap.level_cn or rgsnap.label_cn }}</b> 的含义：{{ rgsnap.desc }}。判据（四条全满足 = <b>强</b>）：收盘 &gt; MA20 且 MA20 &gt; MA{{ rgsnap.ma_slow }} 且斜率 &gt; +{{ rgsnap.slope_min }}% 且 ADX &gt; {{ rgsnap.adx_min|int }} → <b>多头</b>；完全反向 → <b>空头</b>；只满足“收盘在 MA20 一侧 + 斜率同向” → <b>弱多/弱空</b>；其余 → <b>震荡</b>。参数可在<a href="/settings">设置页</a>改，这里的波段划分与仪表盘、飞书播报、<a href="/market">行情波段页</a>读同一份结果。</p>
 </div>
+{% endif %}
+
+{% set tip = tip or {} %}
+{% if tip.get('action') %}
+{% set tpcls = {'buy':'tp-buy','sell':'tp-sell','stop':'tp-stop','expire':'tp-stop',
+                'avoid':'tp-stop','watch':'tp-watch','hold':'tp-hold',
+                'wait':'tp-wait','bull_wait':'tp-wait','off':'tp-off'} %}
+<div class="card">
+  <h2>今日提示 <span class="muted">（提示层只给区间纪律提醒：不给仓位金额、不算收益与胜率、不接管下单）</span></h2>
+  <p style="margin:0 0 10px"><span class="tag {{ tpcls.get(tip.action, 'tp-off') }}" title="{{ tip.action_cn }}｜生效三态 {{ tip.level_cn }}">{{ tip.mark }} {{ tip.action_cn }}</span></p>
+  <div class="pgrid">
+    <div class="prow" title="提示只跟着已判定的三态走：震荡段给 %B 上下沿与止损，多头段给回踩介入，空头段停手"><span>生效三态</span><span class="pv">{{ tip.level_cn }}</span></div>
+    <div class="prow" title="为什么今天这么提示"><span>提示理由</span><span class="pv">{{ tip.reason }}</span></div>
+    {% if tip.pctb is not none %}<div class="prow" title="%B = (收盘 − 下轨) / (上轨 − 下轨)：{{ tip.buy_pctb }} 以下算靠下沿，{{ tip.sell_pctb }} 以上算靠上沿"><span>区间位置 %B</span><span class="pv">{{ tip.pctb|num('%.2f') }}（买 ≤{{ tip.buy_pctb }} / 卖 ≥{{ tip.sell_pctb }}）</span></div>{% endif %}
+    {% if tip.t_buy_px or tip.t_sell_px %}<div class="prow" title="把 %B 阈值按当日布林轨道换算出的参考价位（轨道每天都在变，只作当日定位用）"><span>下沿 / 上沿价位</span><span class="pv">{{ tip.t_buy_px|num }} / {{ tip.t_sell_px|num }}</span></div>{% endif %}
+    {% if tip.entry_date %}<div class="prow" title="本段最近一次 %B 到下沿的提示日"><span>提示买入日 / 当日收盘</span><span class="pv">{{ tip.entry_date }} / {{ tip.entry_close|num }}</span></div>{% endif %}
+    {% if tip.stop_price %}<div class="prow" title="自提示买入当日收盘往下跌 {{ tip.stop_pct }}% 就提示止损，不看当时市场情绪"><span>硬止损位（−{{ tip.stop_pct }}%）</span><span class="pv neg">{{ tip.stop_price|num }}</span></div>{% endif %}
+    {% if tip.hold_days %}<div class="prow" title="最长持 {{ tip.max_hold }} 个交易日，到天数还没到上沿也提示离场"><span>持有进度</span><span class="pv">第 {{ tip.hold_days }}/{{ tip.max_hold }} 日{% if tip.left_days is not none %} · 余 {{ tip.left_days }} 日{% endif %}</span></div>{% endif %}
+    {% if tip.ma20 is not none %}<div class="prow" title="回踩判定：当日最低价距 MA20 在 {{ cfg.t_trade.pb_touch }}% 以内算踩到；量比（成交/20日均量）低于 {{ cfg.t_trade.vol_shrink }}× 算缩量；收盘站上前收算止跌"><span>MA20 / 量比</span><span class="pv">{{ tip.ma20|num }} · {{ tip.vol_ratio|num }}×</span></div>{% endif %}
+    {% if tip.need %}<div class="prow" title="三条条件缺一不提示"><span>回踩未凑满</span><span class="pv">{{ tip.need|join('、') }}</span></div>{% endif %}
+  </div>
+  {% if tip.risk %}<p class="why-bad" style="margin:8px 0 0">⚠️ {{ tip.risk }}</p>{% endif %}
+  <p class="muted" style="margin:10px 0 0">震荡段纪律：<b>%B ≤ {{ tip.buy_pctb }} 提示买入 / %B ≥ {{ tip.sell_pctb }} 提示卖出 / 自提示买入收盘 −{{ tip.stop_pct }}% 硬止损 / 最长持 {{ tip.max_hold }} 日</b>；<b>震荡 → 空头 = 止损回避</b>（下沿买入逻辑当场失效）。多头段想介入要“回踩 MA20 + 缩量止跌”三条全凑，而且这是<b>历史有效性最差的位置</b>。第一纪律：<b>趋势段停手</b>。</p>
+</div>
+{% elif not cfg.t_trade.enabled %}
+<div class="card"><p class="muted" style="margin:0">提示层已在<a href="/settings">设置页</a>关闭：现在页面与推送只报三态与切换分级，不给区间做T提示。</p></div>
 {% endif %}
 
 {% if rsegs %}
