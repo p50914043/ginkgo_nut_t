@@ -2,44 +2,50 @@
 {% set active = 'stocks' %}
 {% block body %}
 <div class="card">
-  <h2>添加股票 <span class="muted">（趋势识别只需要代码与名称，其余信息自动从行情源取）</span></h2>
+  <h2>添加股票 <span class="muted">（趋势识别只需要代码与名称；卖出预警还要给每票选「估值口径类型」与可选的「行业指数」）</span></h2>
   <form method="post" class="inline">
     <input type="hidden" name="action" value="add">
-    <input name="code" placeholder="代码 如 600519 / sh.600519" required style="width:200px">
-    <input name="name" placeholder="名称（留空自动获取）" style="width:160px">
+    <input name="code" placeholder="代码 如 600519 / sh.600519" required style="width:180px">
+    <input name="name" placeholder="名称（留空自动获取）" style="width:150px">
+    <select name="type" style="width:120px" title="估值口径：决定卖出信号 A 用 PE 还是 PB 分位">
+      {% for t in types %}<option value="{{ t }}">{{ type_cn.get(t, t) }}</option>{% endfor %}
+    </select>
+    <input name="index" placeholder="行业指数（可空，默认沪深300：1.000300）" style="width:200px">
+    <label class="ck" title="新添加的股票默认纳入卖出预警扫描（趋势识别本就统计全部标的）"><input type="checkbox" name="enabled" value="on" checked> 纳入卖出预警</label>
     <button class="btn pri">添加</button>
   </form>
-  <p class="muted" style="margin-top:8px">添加后第二天盘后扫描（以及<a href="/">仪表盘</a>、<a href="/market">行情波段页</a>、飞书播报）就会把它纳入判定；日线不足 60 根时先标为“数据不足”，不参与三态统计。</p>
+  <p class="muted" style="margin-top:8px">这份清单是<b>趋势识别与卖出预警共用的唯一清单</b>（卖出工具不再单独维护一份）。添加后第二天盘后扫描（以及<a href="/">股价趋势</a>、<a href="/market">股票行情页</a>、飞书播报、<a href="/sell">卖出预警</a>）就会把它纳入；日线不足 60 根时先标为“数据不足”，不参与三态统计。</p>
 </div>
 
+<form method="post" id="bulk"><input type="hidden" name="action" value="update_all"></form>
 <div class="card">
-  <h2>股票清单（{{ stocks|length }} 只）</h2>
+  <h2>股票清单（{{ stocks|length }} 只） <span class="muted">（改完点底部“保存清单”整表提交；「纳入卖出预警」只影响卖出扫描，趋势识别始终统计全部标的）</span></h2>
   <div class="tblwrap">
   <table class="fit">
-    <colgroup><col style="width:12%"><col style="width:24%"><col style="width:20%"><col style="width:22%"><col style="width:22%"></colgroup>
-    <tr><th>代码</th><th>当前名称</th><th>改名</th><th>删除</th><th>入口</th></tr>
+    <colgroup><col style="width:10%"><col style="width:18%"><col style="width:18%"><col style="width:16%"><col style="width:10%"><col style="width:14%"><col style="width:14%"></colgroup>
+    <tr><th>代码</th><th>名称</th><th>估值口径</th><th>行业指数</th><th>纳入卖出预警</th><th>详情</th><th>删除</th></tr>
     {% for s in stocks %}
     <tr>
       <td class="nw">{{ s.code }}</td>
-      <td>{{ s['name'] }}</td>
-      <td>
-        <form method="post" class="inline" style="margin:0">
-          <input type="hidden" name="action" value="rename">
-          <input type="hidden" name="code" value="{{ s.code }}">
-          <input name="name" value="{{ s['name'] }}" style="width:140px">
-          <button class="btn">保存名称</button></form>
-      </td>
+      <td><input form="bulk" name="name_{{ s.code }}" value="{{ s['name'] }}" style="width:130px"></td>
+      <td><select form="bulk" name="type_{{ s.code }}" style="width:100%;min-width:88px" title="非金融 PE-TTM / 银行 PB / 保险 PB（代理PEV）/ 周期 PB">
+        {% for t in types %}<option value="{{ t }}" {{ 'selected' if s.type==t }}>{{ type_cn.get(t, t) }}</option>{% endfor %}
+      </select></td>
+      <td><input form="bulk" name="index_{{ s.code }}" value="{{ s.index or '1.000300' }}" placeholder="行业指数代码（默认沪深300：1.000300）" style="width:100%;min-width:110px"></td>
+      <td><label class="ckc" title="勾选则纳入卖出预警扫描；取消即只参与趋势识别"><input form="bulk" type="checkbox" name="enabled_{{ s.code }}" value="on" {{ 'checked' if s.enabled }}></label></td>
+      <td><a href="/stock/{{ s.code }}" style="color:var(--blue);text-decoration:none">日K与波段详情</a></td>
       <td>
         <form method="post" class="inline" style="margin:0">
           <input type="hidden" name="action" value="del">
           <input type="hidden" name="code" value="{{ s.code }}">
           <button class="btn" onclick="return confirm('删除 {{ s.name }}?')">删除</button></form>
       </td>
-      <td><a href="/stock/{{ s.code }}" style="color:var(--blue);text-decoration:none">日K与波段详情</a></td>
     </tr>
     {% endfor %}
   </table>
   </div>
-  <p class="muted">交易相关的字段（底仓股数/成本、档位、单独票数门槛）已随交易层一起删除：本工具只识别行情，不再需要这些输入，清单也只保存代码与名称。</p>
+  <button form="bulk" class="btn pri" style="margin-top:10px">保存清单</button>
+  <span class="muted">名称 / 估值口径 / 行业指数 / 纳入开关一次性提交。</span>
+  <p class="muted" style="margin-top:10px">交易相关字段（底仓股数/成本、档位、单独票数门槛）已随交易层一起删除：本工具只识别行情、给风险预警，不做记账与下单。</p>
 </div>
 {% endblock %}

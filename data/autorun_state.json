@@ -1,14 +1,20 @@
 {
- "last_run_date": "2026-10-22",
+ "last_run_date": "2026-10-23",
  "last_result": "成功",
- "last_detail": "趋势 多头4/空头5/震荡1（今日变化 0 只：🔴🔴 0 / 🟡 0；酝酿 2 只；提示 0 只）/ 未判定 0 只 / 数据日期 2026-10-22 / 通道 webhook / code=0 success",
+ "last_detail": "趋势 多头4/空头4/震荡2（今日变化 1 只：🔴🔴 0 / 🟡 1；酝酿 2 只；提示 1 只）/ 未判定 1 只 / 数据日期 2026-10-23 / 通道 webhook / code=0 success",
  "last_rows": 10,
- "last_trend": "4/5/1",
- "last_trend_changed": [],
- "last_data_date": "2026-10-22",
+ "last_trend": "4/4/2",
+ "last_trend_changed": [
+  "牧原股份"
+ ],
+ "last_data_date": "2026-10-23",
  "last_pushed": true,
- "last_run_at": "2026-10-22 20:24:10",
+ "last_run_at": "2026-10-23 20:38:43",
  "last_strong_flips": 0,
- "last_momentum_flips": 0,
- "last_tips": 0
+ "last_momentum_flips": 1,
+ "last_tips": 1,
+ "last_sell_pushed": false,
+ "last_sell_alerts": 11,
+ "last_sell_note": "红1/黄10 共11只",
+ "last_sell_at": "2026-10-23 20:44:40"
 }

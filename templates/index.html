@@ -1,8 +1,21 @@
 {% extends "base.html" %}
 {% set active = 'home' %}
 {% block body %}
+<style>
+.cfgfold{background:#fff;border:1px solid var(--line);border-radius:10px;margin-bottom:16px}
+.cfgfold>summary{cursor:pointer;padding:13px 18px;font-size:14px;font-weight:600;list-style:none}
+.cfgfold>summary::-webkit-details-marker{display:none}
+.cfgfold>summary:before{content:'▸ ';color:var(--sub)}
+.cfgfold[open]>summary:before{content:'▾ '}
+.cfgfold>.card{border:none;border-top:1px solid var(--line);border-radius:0;box-shadow:none;margin-bottom:0}
+</style>
+{% set settings_next = '/' %}
+<details class="cfgfold" id="config">
+  <summary>⚙ 参数配置（三态判定 / 做T提示 / 盘后自动运行）<span class="muted" style="font-weight:400">　—　改完点“保存参数”，回到本页按新参数重扫生效；飞书通知在<a href="/settings">设置页</a></span></summary>
+  {% include '_settings_judgment.html' %}
+</details>
 <div class="card">
-  <h2>趋势仪表盘 <span class="muted">（盘后生成：只用均线识别多头 / 空头 / 震荡，震荡段附做T纪律提示 · 不给仓位金额、不接管下单）</span></h2>
+  <h2>股价趋势 <span class="muted">（盘后生成：只用均线识别多头 / 空头 / 震荡，震荡段附做T纪律提示 · 不给仓位金额、不接管下单）</span></h2>
   <div class="form-inline" style="display:flex;gap:10px;margin-bottom:10px">
     <a class="btn pri" href="/?refresh=1">更新数据并重新扫描</a>
     <form method="post" action="/notify" class="inline">
@@ -12,7 +25,7 @@
   </div>
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:8px 12px;background:#f8fafc;border:1px solid var(--line);border-radius:8px">
     <span class="tag {{ 'ok' if autorun_st.enabled else 'bad' }}">盘后自动运行：{{ '开' if autorun_st.enabled else '关' }}</span>
-    <span class="muted">每日 <b>{{ autorun_st.time }}</b> 一次　线程{{ '运行中' if autorun_st.alive else '未启动' }}　下次 {{ autorun_st.next }}　上次 {{ autorun_st.last_run_at }} / {{ autorun_st.last_result }}（{{ autorun_st.last_detail }}）</span>
+    <span class="muted">每日 <b>{{ autorun_st.time }}</b> 一次　线程{{ '运行中' if autorun_st.alive else '未启动' }}　下次 {{ autorun_st.next }}　上次 {{ autorun_st.last_run_at }} / {{ autorun_st.last_result }}（{{ autorun_st.last_detail }}）　｜　<span title="盘后自动任务在趋势播报后追发卖出预警：仅当日出现红/黄信号才推，0 预警不推送；总开关在 /sell 因子配置">卖出预警自动追发：<b>{{ '开' if autorun_st.sell_enabled else '关' }}</b>（有红/黄才推）　上次 {{ autorun_st.last_sell_note }}{{ '·已推' if autorun_st.last_sell_pushed else '·未推' }}</span></span>
     <form method="post" action="/autorun" class="inline">
       <input type="hidden" name="auto_run_time" value="{{ cfg.auto_run_time }}">
       <input type="hidden" name="action" value="{{ 'off' if autorun_st.enabled else 'on' }}">

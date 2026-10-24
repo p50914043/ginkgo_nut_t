@@ -10,7 +10,7 @@ sys.path.insert(0, '.')
 
 from core import config, scan as scan_mod
 from core.notifier import push, format_trend_message, describe_channel
-from core.autorun import TITLE
+from core.autorun import TITLE, push_sell_alert
 
 
 def _report(res, dry):
@@ -41,6 +41,17 @@ def main():
             r['code'], r['name'], snap.get('label_cn', r['status']),
             ('%.2f' % r['close']) if r.get('close') else '-', snap.get('days', '-')))
     _report(push(TITLE, format_trend_message(trend['date'], trend), cfg, dry_run=dry), dry)
+    # 趋势播报后追发卖出预警（仅当出现红/黄信号才推）
+    sell = push_sell_alert(cfg, dry_run=dry)
+    if sell.get('pushed'):
+        print('✅ 卖出预警已推送：红%d/黄%d 共%d只' % (
+            sell.get('n_red', 0), sell.get('n_yellow', 0), sell.get('n_alerts', 0)))
+    elif sell.get('skipped'):
+        print('卖出预警：%s（未推送）' % sell.get('reason'))
+    elif sell.get('error'):
+        print('卖出预警：扫描失败 %s' % sell.get('error'))
+    else:
+        print('卖出预警：推送未成功 code=%s' % (sell.get('result') or {}).get('code'))
 
 
 if __name__ == '__main__':

@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% set active = 'sell' %}
+
+{% macro sig_badge(s) %}
+  {%- if s.level == 'red' -%}<span class="sb sb-red">🔴 红色预警</span>
+  {%- elif s.level == 'yellow' -%}<span class="sb sb-yel">🟡 黄色预警</span>
+  {%- elif s.status == 'off' -%}<span class="sb sb-off">已关闭</span>
+  {%- elif s.status is not none and s.status != 'ok' -%}<span class="sb sb-pend">⭕ 待核验</span>
+  {%- else -%}<span class="sb sb-ok">✅ 未触发</span>
+  {%- endif -%}
+{% endmacro %}
+
+{% block body %}
+<style>
+.shead{background:#1e293b;color:#fff;border-radius:12px;padding:18px 22px;margin-bottom:14px;
+  display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
+.shead-t{font-size:20px;font-weight:700}
+.shead-s{font-size:12.5px;color:#9fb0c3;margin-top:4px}
+.shead-s a{color:#93c5fd;text-decoration:none}
+.shead-b{display:flex;gap:8px;align-items:center}
+.sbtn{background:#334155;color:#e2e8f0;border:1px solid #475569;border-radius:8px;padding:8px 14px;
+  font-size:13px;cursor:pointer;text-decoration:none;display:inline-block}
+.sbtn:hover{background:#475569}
+.sbtn.pri{background:#2563eb;border-color:#2563eb;color:#fff}
+.sbtn.pri:hover{background:#1d4ed8}
+.skpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px}
+.skpi{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 16px}
+.skpi .k{font-size:12.5px;color:var(--sub);display:flex;align-items:center;gap:5px}
+.skpi .v{font-size:26px;font-weight:700;margin-top:2px}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+.dot.red{background:var(--red)}.dot.yel{background:#eab308}
+.v.red{color:var(--red)}.v.yel{color:#b45309}.v.ok{color:var(--green)}.v.sub{color:var(--sub)}
+.scfg{background:#fff;border:1px solid var(--line);border-radius:10px;margin-bottom:14px}
+.scfg>summary{cursor:pointer;padding:13px 18px;font-size:14px;font-weight:600;list-style:none}
+.scfg>summary::-webkit-details-marker{display:none}
+.scfg>summary:before{content:'▸ ';color:var(--sub)}
+.scfg[open]>summary:before{content:'▾ '}
+.scfg-body{padding:0 18px 16px;border-top:1px solid var(--line)}
+.scfg-body .pgroup{margin-top:14px}
+.scard{background:#fff;border:1px solid var(--line);border-left:4px solid var(--sub);border-radius:10px;
+  padding:14px 16px;margin-bottom:12px}
+.scard.st-red{border-left-color:var(--red)}
+.scard.st-yellow{border-left-color:#eab308}
+.scard.st-pending{border-left-color:#94a3b8}
+.scard.st-none{border-left-color:var(--green)}
+.scard-h{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.scard-h .nm{font-size:16px;font-weight:700}
+.scard-h .meta{font-size:12.5px;color:var(--sub);margin-left:6px}
+.sigrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}
+.sig{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:#fbfcfe}
+.sig-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.sig-h b{font-size:13.5px}
+.sb{font-size:11.5px;padding:1px 8px;border-radius:99px;white-space:nowrap}
+.sb-red{background:#fee2e2;color:var(--red)}
+.sb-yel{background:#fef3c7;color:#b45309}
+.sb-ok{background:#dcfce7;color:var(--green)}
+.sb-pend{background:#f1f5f9;color:var(--sub)}
+.sb-off{background:#f8fafc;color:#94a3b8}
+.sig .kv{font-size:12.5px;color:var(--sub);margin:3px 0;line-height:1.5}
+.sig .kv b{color:var(--txt);font-weight:600}
+.sig .hit{color:var(--red)}
+.sig .note{font-size:12px;color:#94a3b8;margin-top:5px;line-height:1.5}
+.pv{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,Consolas,monospace;
+  font-size:12.5px;line-height:1.6;background:#fbfcfe;border:1px solid var(--line);border-radius:8px;
+  padding:10px 12px;max-height:320px;overflow:auto;margin:6px 0}
+</style>
+
+<div class="shead">
+  <div>
+    <div class="shead-t">卖出信号监控</div>
+    <div class="shead-s">数据来源：东方财富 · 快照 {{ rep.date or '—' }} · 共 {{ rep.get('n_monitor', rep.get('rows', [])|length) }} 只 ·
+      见各信号明细 · <a href="/sell?refresh=1">强制重拉数据</a></div>
+  </div>
+  <div class="shead-b">
+    <a class="sbtn" href="/sell/backtest" target="_blank">历史回测</a>
+    <a class="sbtn" href="/stocks">股票清单</a>
+    <a class="sbtn" href="/settings">通知设置</a>
+    <form method="post" action="/sell/send" style="display:inline"
+          onsubmit="return confirm('把当前全部预警真实推送到飞书？确认已核对清单与阈值。')">
+      <input type="hidden" name="dry" value="0">
+      <button class="sbtn pri">发送今日信号</button>
+    </form>
+  </div>
+</div>
+
+<div class="skpis">
+  <div class="skpi"><div class="k">监控股票</div><div class="v">{{ rep.get('n_monitor', rep.get('rows', [])|length) }}</div></div>
+  <div class="skpi"><div class="k"><span class="dot red"></span>红色预警</div><div class="v red">{{ rep.n_red }}</div></div>
+  <div class="skpi"><div class="k"><span class="dot yel"></span>黄色预警</div><div class="v yel">{{ rep.n_yellow }}</div></div>
+  <div class="skpi"><div class="k">✅ 未触发</div><div class="v ok">{{ rep.get('n_notrig', 0) }}</div></div>
+  <div class="skpi"><div class="k">⭕ 待核验</div><div class="v sub">{{ rep.get('n_pending', 0) }}</div></div>
+</div>
+
+<details class="scfg" id="config">
+  <summary>⚙ 配置（因子阈值 / 通知）</summary>
+  <div class="scfg-body">
+
+    <div class="pgroup">
+      <h3>监控标的</h3>
+      <p class="muted" style="margin:0 0 8px">卖出预警直接复用「股票清单」中的标的（不再单独维护一份清单）：本次纳入扫描 {{ rep.get('stocks', [])|length }} 只，共 {{ rep.get('n_monitor', rep.get('rows', [])|length) }} 只。要改盯哪些票、它们的估值口径（类型）与行业指数，请去<a href="/stocks">股票清单页</a>。</p>
+      <a class="btn pri" href="/stocks">管理股票清单 →</a>
+    </div>
+
+    <form method="post" action="/sell/factors">
+      <input type="hidden" name="sell_present" value="1">
+      <div class="pgroup">
+        <h3>总开关</h3>
+        <div class="prow">
+          <label title="{{ ph.get('sell_enabled') }}" style="display:flex;align-items:center;gap:6px">
+            <input type="checkbox" name="sell_enabled" {{ 'checked' if sn.get('enabled') }}> 启用卖出通知工具
+          </label>
+          <span class="muted">关闭后不再扫描与播报，趋势识别主功能不受影响</span>
+        </div>
+      </div>
+      <div class="pgroup">
+        <h3>信号 A｜估值过高 <span class="ptag">非金融 PE-TTM（5年）· 银行 PB（10年）· 保险 PB 代理 PEV（5年）· 周期 PB（10年）</span></h3>
+        <div class="pgrid">
+          <div class="prow"><label title="{{ ph.get('a_yellow') }}">黄色预警分位 ≥（%）</label><input name="a_yellow" value="{{ sn.get('a_yellow') }}" style="width:90px"></div>
+          <div class="prow"><label title="{{ ph.get('a_red') }}">红色预警分位 ≥（%）</label><input name="a_red" value="{{ sn.get('a_red') }}" style="width:90px"></div>
+          <div class="prow"><label title="{{ ph.get('a_years_pe') }}">PE / PEV（代理）回看年数</label><input name="a_years_pe" value="{{ sn.get('a_years_pe') }}" style="width:90px"></div>
+          <div class="prow"><label title="{{ ph.get('a_years_pb') }}">PB 回看年数</label><input name="a_years_pb" value="{{ sn.get('a_years_pb') }}" style="width:90px"></div>
+        </div>
+      </div>
+      <div class="pgroup">
+        <h3>信号 B｜基本面恶化 <span class="ptag">三组因子，同组只计一次、跨组才计数；任一组命中 → 黄色</span></h3>
+        <div class="pgrid">
+          <div class="prow"><label title="{{ ph.get('b_ocf_ratio') }}">OCF/净利润 恶化线</label><input name="b_ocf_ratio" value="{{ sn.get('b_ocf_ratio') }}" style="width:90px"></div>
+          <div class="prow"><label title="{{ ph.get('b_debt_up') }}">负债率同比升（pct）</label><input name="b_debt_up" value="{{ sn.get('b_debt_up') }}" style="width:90px"></div>
+          <div class="prow"><label title="{{ ph.get('b_growth_gap') }}">应收/存货超营收 Gap（pct）</label><input name="b_growth_gap" value="{{ sn.get('b_growth_gap') }}" style="width:90px"></div>
+          <div class="prow"><label title="{{ ph.get('b_roe_years') }}">ROE 连降年报数</label><input name="b_roe_years" value="{{ sn.get('b_roe_years') }}" style="width:90px"></div>
+          <div class="prow"><label title="{{ ph.get('b_div_drop') }}">分红降幅阈值（%）</label><input name="b_div_drop" value="{{ sn.get('b_div_drop') }}" style="width:90px"></div>
+          <div class="prow"><label title="{{ ph.get('b_red_groups') }}">升红命中组数 ≥</label><input name="b_red_groups" value="{{ sn.get('b_red_groups') }}" style="width:90px"></div>
+        </div>
+      </div>
+      <div class="pgroup">
+        <h3>信号 C｜行业与宏观 <span class="ptag">回撤 × 同行预警 两条件同时成立才黄色（第一版简化版）</span></h3>
+        <div class="pgrid">
+          <div class="prow"><label title="{{ ph.get('c_dd_pct') }}">指数回撤阈值（%）</label><input name="c_dd_pct" value="{{ sn.get('c_dd_pct') }}" style="width:90px"></div>
+          <div class="prow"><label title="{{ ph.get('c_dd_days') }}">近期高点回看（交易日）</label><input name="c_dd_days" value="{{ sn.get('c_dd_days') }}" style="width:90px"></div>
+          <div class="prow"><label title="{{ ph.get('c_warn_days') }}">预警公告回看（自然日）</label><input name="c_warn_days" value="{{ sn.get('c_warn_days') }}" style="width:90px"></div>
+          <div class="prow"><label title="{{ ph.get('c_warn_peers') }}">同行预警家数 ≥</label><input name="c_warn_peers" value="{{ sn.get('c_warn_peers') }}" style="width:90px"></div>
+        </div>
+      </div>
+      <div class="pgroup">
+        <h3>信号 D｜社保或保险卖出 <span class="ptag">最近两个季度末十大流通股东对比 → 黄色</span></h3>
+        <div class="prow">
+          <label title="{{ ph.get('d_on') }}" style="display:flex;align-items:center;gap:6px">
+            <input type="checkbox" name="sell_d_on" {{ 'checked' if sn.get('d_on') }}> 启用信号 D
+          </label>
+          <span class="muted">只在机构进了“前十”时可见，未进前十的减持看不到</span>
+        </div>
+      </div>
+      <div class="pgroup">
+        <h3>历史回测</h3>
+        <div class="prow"><label title="{{ ph.get('bt_years') }}">默认回测年数</label><input name="bt_years" value="{{ sn.get('bt_years') }}" style="width:90px"></div>
+      </div>
+      <button class="btn pri" type="submit">保存配置</button>
+      <span class="muted">保存后回到本页并按新阈值重扫生效。</span>
+    </form>
+
+    <div class="pgroup">
+      <h3>通知</h3>
+      <p class="muted" style="margin:0 0 6px">通知通道：{{ notifier_desc }}
+        {% if not sn.get('enabled') %} · <b style="color:var(--amber)">飞书通知已关闭</b>（总开关未启用，不会扫描与播报）{% endif %}
+      </p>
+      <form method="post" action="/sell/send" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <input type="hidden" name="dry" value="1">
+        <button class="btn">生成 dry-run 预览并记入历史</button>
+        <span class="muted">只记入发送历史，不真实推送</span>
+      </form>
+      <div class="muted">发送前预览：</div>
+      <pre class="pv">{{ preview|join('\n') }}</pre>
+      {% if logs %}
+      <div class="muted" style="margin-top:8px">最近发送记录：</div>
+      <table class="fit">
+        <tr><th>时间</th><th>方式</th><th>结果</th><th>通道</th><th>说明</th></tr>
+        {% for l in logs %}
+        <tr>
+          <td class="nw">{{ l.ts }}</td>
+          <td>{% if l.dry %}dry-run{% else %}真实推送{% endif %}</td>
+          <td>{% if l.ok %}<span class="tag ok">成功</span>{% else %}<span class="tag bad">失败 code={{ l.code }}</span>{% endif %}</td>
+          <td class="nw">{{ l.channel }}</td>
+          <td>{{ l.msg }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% endif %}
+    </div>
+
+  </div>
+</details>
+
+{% if rep.get('disabled') %}
+<div class="card"><b>卖出通知工具当前处于关闭状态。</b>
+  <span class="muted">在上方「⚙ 配置」里勾选“启用卖出通知工具”并保存后即可恢复扫描与播报。</span></div>
+{% endif %}
+
+{% for r in rep.get('cards') or rep.get('rows', []) %}
+{% set st = r.get('state') or ('red' if r.level == 'red' else 'yellow' if r.level == 'yellow' else 'none') %}
+<div class="scard st-{{ st }}">
+  <div class="scard-h">
+    <div>
+      <span class="nm">{{ r.name }}</span>
+      <span class="meta">{{ r.code }} · {{ r.type_cn }}{% if r.industry and r.industry != '-' %} · {{ r.industry }}{% endif %}
+        {% if r.quote and r.quote.get('close') %} · 现价 {{ r.quote.close|num('%.2f') }}{% if r.quote.get('chg_pct') is not none %} <span class="{{ 'pos' if r.quote.chg_pct > 0 else 'neg' }}">{{ r.quote.chg_pct|chg }}</span>{% endif %}{% endif %}</span>
+    </div>
+    <div>
+      {% if st == 'red' %}<span class="sb sb-red">🔴 红色预警</span>
+      {% elif st == 'yellow' %}<span class="sb sb-yel">🟡 黄色预警</span>
+      {% elif st == 'pending' %}<span class="sb sb-pend">⭕ 待核验</span>
+      {% else %}<span class="sb sb-ok">✅ 未触发</span>{% endif %}
+    </div>
+  </div>
+  {% if r.error %}<div class="note" style="color:var(--red);margin-bottom:8px">数据异常：{{ r.error }}</div>{% endif %}
+  <div class="sigrid">
+
+    <div class="sig">
+      <div class="sig-h"><b>A 估值过高</b>{{ sig_badge(r.a) }}</div>
+      {% if r.a.status == 'ok' %}
+        <div class="kv">判定口径（按类型亮灯）：<b>{{ r.a.metric }} 近 {{ r.a.years }} 年 → {{ r.a.pct|num('%.1f') }}% 分位</b></div>
+        <div class="kv">PE-TTM <b>{{ r.a.pe.val|num('%.2f') }}</b><span class="muted">｜近 {{ r.a.pe.years }} 年分位</span> <b>{{ r.a.pe.pct|num('%.1f') }}%</b></div>
+        <div class="kv">PB(MRQ) <b>{{ r.a.pb.val|num('%.2f') }}</b><span class="muted">｜近 {{ r.a.pb.years }} 年分位</span> <b>{{ r.a.pb.pct|num('%.1f') }}%</b></div>
+        <div class="kv">股息率 TTM <b>{{ r.a.dy|num('%.2f') }}%</b></div>
+      {% else %}
+        <div class="note">{{ r.a.detail }}</div>
+      {% endif %}
+    </div>
+
+    <div class="sig">
+      <div class="sig-h"><b>B 基本面恶化</b>{{ sig_badge(r.b) }}</div>
+      {% if r.b.status == 'ok' %}
+        <div class="kv">触发组数：<b>{{ r.b.n_groups }} / 3</b>{% if r.b.latest_report %} · 最新财报 {{ r.b.latest_report }}{% endif %}</div>
+        {% for g in r.b.groups %}
+        <div class="kv">第{{ loop.index }}组 {{ g.cn }}：{% if g.hits %}<span class="hit">{{ g.hits|join('、') }}</span>{% else %}未触发{% endif %}</div>
+        {% endfor %}
+      {% else %}
+        <div class="note">{{ r.b.detail }}</div>
+      {% endif %}
+    </div>
+
+    <div class="sig">
+      <div class="sig-h"><b>C 行业与宏观</b>{{ sig_badge(r.c) }}</div>
+      {% if r.c.status == 'ok' %}
+        <div class="kv">跟踪指数：<b>{{ r.c.index }}</b>（行业 {{ r.c.industry }}）</div>
+        <div class="kv">指数回撤：<b>{{ r.c.dd|num('%.1f') }}%</b> / 阈值 {{ r.c.dd_thr }}% {{ '✓' if r.c.dd_ok else '✗' }}</div>
+        <div class="kv">同行预警：<b>{{ r.c.n_peers }} 家</b> / 阈值 {{ sn.get('c_warn_peers') }} 家 {{ '✓' if r.c.peers_ok else '✗' }}</div>
+        <div class="note">回撤与同行预警两条件同时成立才触发（与门）</div>
+      {% else %}
+        <div class="note">{{ r.c.detail }}</div>
+      {% endif %}
+    </div>
+
+    <div class="sig">
+      <div class="sig-h"><b>D 社保/保险卖出</b>{{ sig_badge(r.d) }}</div>
+      {% if r.d.status == 'ok' %}
+        <div class="kv">比对区间：<b>{{ r.d.prev_end }} → {{ r.d.cur_end }}</b>（前十共 {{ r.d.n_inst }} 家机构）</div>
+        {% if r.d.hits %}
+          {% for h in r.d.hits %}<div class="kv hit">• {{ h.name }}（{{ h.kind }}）{{ h.note }}</div>{% endfor %}
+        {% else %}
+          <div class="note">{{ r.d.detail }}</div>
+        {% endif %}
+      {% else %}
+        <div class="note">{{ r.d.detail }}</div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+{% else %}
+<div class="card muted">监控清单为空（或均未启用）。去<a href="/stocks">股票清单</a>添加要盯的标的并勾选“纳入卖出预警”后回来查看预警。</div>
+{% endfor %}
+{% endblock %}

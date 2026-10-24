@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% set active = 'sell_backtest' %}
+{% block body %}
+<div class="card">
+  <h2>卖出预警 · 历史回测
+    <span class="muted">（复盘四路信号在过去何时“进入预警”，并附事件后 5/10/20 个交易日的涨跌作有效性参考——只是复盘预警时点，不是收益承诺）</span>
+  </h2>
+  <div style="display:flex;gap:8px;font-size:13px;margin-bottom:10px">
+    <a class="btn" href="/sell" target="_self">← 返回卖出信号监控</a>
+  </div>
+  <form method="post">
+    <b>标的</b> <span class="muted">（不选=全部启用项）</span>
+    <a href="javascript:void(0)" onclick="toggleAll(true)">全选</a> /
+    <a href="javascript:void(0)" onclick="toggleAll(false)">清空</a>
+    <div class="stockpick">
+      {% for s in stocks %}
+      <label><input type="checkbox" name="codes" value="{{ s.code }}"
+        {% if not form.get('codes') or s.code in form.get('codes', []) %}checked{% endif %}>
+        {{ s.name }} <span class="muted">{{ s.code }}</span></label>
+      {% endfor %}
+    </div>
+    <div class="prow" style="margin-top:10px">
+      <label title="回看年数：越久拉的数据越多，首次回测可能要 1~3 分钟">回看年数</label>
+      <input name="years" value="{{ form.get('years') or sn.get('bt_years') or 3 }}" style="width:90px">
+      <button class="btn pri" type="submit" style="margin-left:10px">开始回测</button>
+    </div>
+  </form>
+  <p class="muted">事件口径与总览页一致：A 取估值分位“上穿预警线”的交易日；B 按财报披露日复盘当时可见数据；C 取“回撤×同行预警”两条件同时成立的首日；D 取新披露季度里机构减持/退出的披露时点。</p>
+</div>
+
+{% if bt %}
+<div class="card">
+  <h2>回测汇总 <span class="muted">（区间 {{ bt.start }} 至今 · {{ bt.years }} 年 · 事件共 {{ bt.n_all }} 起）</span></h2>
+  <div class="kpis">
+    <div class="kpi"><div class="v">{{ bt.n_all }}</div><div class="k">预警事件总数</div></div>
+    <div class="kpi"><div class="v">{{ bt.stocks|length }}</div><div class="k">参与标的</div></div>
+    <div class="kpi"><div class="v">{{ bt.avg20_all|num('%.1f') }}%</div><div class="k">全部事件后 20 日平均涨跌</div></div>
+  </div>
+  <div class="tblwrap">
+  <table class="fit">
+    <tr><th>信号</th><th>事件数</th><th>事件后 5 日平均</th><th>事件后 20 日平均</th><th>20 日后下跌占比</th></tr>
+    {% for s in bt.summary %}
+    <tr>
+      <td class="nw">{{ s.sig_cn }}</td>
+      <td class="num">{{ s.n }}</td>
+      <td class="num"><span class="{{ 'pos' if (s.avg5 or 0) > 0 else 'neg' }}">{{ s.avg5|chg }}</span></td>
+      <td class="num"><span class="{{ 'pos' if (s.avg20 or 0) > 0 else 'neg' }}">{{ s.avg20|chg }}</span></td>
+      <td class="num">{% if s.drop_pct is not none %}{{ s.drop_pct|num('%.1f') }}%{% else %}-{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  <p class="muted">“20 日后下跌占比”越高，说明该信号预警后股价走弱越常见；样本少（事件数个位数）时仅作参考，不构成结论。</p>
+</div>
+
+<div class="card">
+  <h2>事件明细（{{ bt.events|length }} 起）</h2>
+  <div class="tblwrap">
+  <table class="fit wide">
+    <colgroup><col style="width:10%"><col style="width:13%"><col style="width:13%"><col style="width:7%"><col style="width:31%"><col style="width:9%"><col style="width:9%"><col style="width:9%"></colgroup>
+    <tr><th>日期</th><th>标的</th><th>信号</th><th>级别</th><th>依据</th><th>后5日</th><th>后10日</th><th>后20日</th></tr>
+    {% for e in bt.events %}
+    <tr>
+      <td class="nw">{{ e.date }}</td>
+      <td class="nw"><a href="/stock/{{ e.code }}" style="color:var(--blue);text-decoration:none">{{ e.name }}</a>
+        <span class="muted">{{ e.code }}</span></td>
+      <td class="nw">{{ e.sig_cn }}</td>
+      <td>{% if e.level == 'red' %}<span class="tag tp-sell">🔴</span>{% else %}<span class="tag tp-stop">🟡</span>{% endif %}</td>
+      <td>{{ e.detail }}</td>
+      {% for k in ('ret5', 'ret10', 'ret20') %}
+      <td class="num">{% if e.get(k) is not none %}<span class="{{ 'pos' if e[k] > 0 else 'neg' }}">{{ e[k]|chg }}</span>{% else %}-{% endif %}</td>
+      {% endfor %}
+    </tr>
+    {% else %}
+    <tr><td colspan="8" class="muted">区间内没有信号进入过预警（或数据不足）。</td></tr>
+    {% endfor %}
+  </table>
+  </div>
+</div>
+{% endif %}
+
+<script>
+function toggleAll(v){document.querySelectorAll('input[name=codes]').forEach(function(x){x.checked=v;});}
+</script>
+{% endblock %}

@@ -1,8 +1,16 @@
 {% extends "base.html" %}
 {% set active = 'market' %}
 {% block body %}
+<style>
+.mkfold{border:1px solid var(--line);border-radius:8px;padding:0 12px;margin-top:12px;background:#fbfcfe}
+.mkfold>summary{cursor:pointer;padding:11px 4px;font-size:13px;font-weight:600;list-style:none}
+.mkfold>summary::-webkit-details-marker{display:none}
+.mkfold>summary:before{content:'▸ ';color:var(--sub)}
+.mkfold[open]>summary:before{content:'▾ '}
+.mkfold>.pgroup{margin-top:4px}
+</style>
 <div class="card">
-  <h2>行情波段 <span class="muted">（在历史日K上标出均线三态波段与趋势切换点 · 只做行情识别与区间纪律提示，不记账、不算收益）</span></h2>
+  <h2>股票行情 <span class="muted">（在历史日K上标出均线三态波段与趋势切换点 · 只做行情识别与区间纪律提示，不记账、不算收益）</span></h2>
   <form method="post">
     <div class="inline" style="row-gap:8px">
       <label>开始<input name="start" type="date" value="{{ start }}"></label>
@@ -11,7 +19,9 @@
       <button class="btn pri">生成波段图</button>
     </div>
 
-    <div class="pgroup" style="margin-top:12px">
+    <details class="mkfold">
+    <summary>⚙ 三态判定参数 / 震荡做T提示参数（现场覆盖，默认折叠） <span class="muted">（点开才填：仅本次查询生效，不动「股价趋势」页保存的配置；留空即沿用已保存的值）</span></summary>
+    <div class="pgroup">
       <h3>三态判定参数 <span class="muted">（只影响这段历史怎么切波段，留空则用设置页的值）</span></h3>
       <div class="inline" style="row-gap:8px">
         <label title="{{ ph.get('ma_fast') }}">快线MA<input name="ma_fast" style="width:60px" value="{{ form.get('ma_fast','') }}" placeholder="{{ rg.ma_fast }}"></label>
@@ -24,7 +34,7 @@
       </div>
     </div>
 
-    <div class="pgroup" style="margin-top:12px">
+    <div class="pgroup">
       <h3>震荡段做T提示参数 <span class="muted">（只作今日提示列与图上提示线，不留痕历史波段）</span></h3>
       <input type="hidden" name="t_trade_present" value="1">
       <div class="inline" style="row-gap:8px">
@@ -39,6 +49,7 @@
         <span class="muted">震荡段：%B ≤ {{ tt.buy_pctb }} 提示买入 / ≥ {{ tt.sell_pctb }} 提示卖出 / −{{ tt.stop_pct }}% 硬止损 / 最长 {{ tt.max_hold }} 日；震荡 → 空头 = 止损回避；多头段回踩 MA20 + 缩量止跌才提示介入（附最高风险）。第一纪律：趋势段停手。</span>
       </div>
     </div>
+    </details>
 
     <div style="margin-top:10px">
       <b>标的</b> <span class="muted">（不选=全部）</span>
@@ -52,7 +63,7 @@
         {% endfor %}
       </div>
     </div>
-    <div class="muted" style="margin-top:8px">默认读本地缓存（秒级返回），勾选“先更新行情”才会增量拉取最新日线。每只票最多画 400 根日线，超出部分只统计不画。</div>
+    <div class="muted" style="margin-top:8px">默认读本地缓存（秒级返回），勾选“先更新行情”才会增量拉取最新日线。K 线画满所选起止区间内的全部交易日（图范围与开始/结束时间一致）。</div>
   </form>
 </div>
 
@@ -114,7 +125,7 @@
 <div class="card">
   <h2>日K · 三态波段与趋势切换点</h2>
   <p class="muted">背景色块 = 均线 + ADX 判定的三态波段（<span class="rb">多头·红</span> <span class="rg2">空头·绿</span> <span class="gr">震荡·灰</span>）；
-    <b>◆</b> 标在趋势变化的那天，悬停可看分级与“旧态 → 新态”；副图为量能 / ADX（虚线为强档门槛 {{ rg.adx_min|int }}）/ MACD。悬停任意一天可看当日指标与“本波段第几天”；悬停最后一天可同时看到今日提示（%B 上下沿价位与硬止损位）。图上的 <b>⛔ 趋势段停手</b> 意味着该段不是震荡，不给区间提示。</p>
+    <b>◆</b> 标在趋势变化的那天，悬停可看分级与“旧态 → 新态”；副图为量能 / ADX（虚线为强档门槛 {{ rg.adx_min|int }}）/ RSI（虚线为 30 / 70 参考线）。悬停任意一天可看当日指标与“本波段第几天”，悬停最后一天可同时看到今日提示（%B 上下沿价位与硬止损位）。图上的 <b>⛔ 趋势段停手</b> 意味着该段不是震荡，不给区间提示。</p>
   {% for c in charts %}
   <div class="kwrap">
     <div class="khead">{{ c.name }} <span class="muted">{{ c.code }}</span>

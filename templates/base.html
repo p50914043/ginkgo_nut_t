@@ -30,6 +30,10 @@ tr:hover td{background:#f8fafc}
 padding:5px 12px;font-size:13px;cursor:pointer;text-decoration:none;color:var(--txt)}
 .btn.pri{background:var(--blue);color:#fff;border-color:var(--blue)}
 input,select{border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;background:#fff}
+/* 勾选框：默认太小不好点，放大到 20px 并居中对齐（accent-color 跟随主题蓝） */
+input[type=checkbox]{width:20px;height:20px;padding:0;border-radius:5px;accent-color:var(--blue);cursor:pointer;vertical-align:middle}
+.ck{display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--sub);user-select:none}
+.ckc{display:flex;align-items:center;justify-content:center;min-height:30px;cursor:pointer}
 .flash{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;padding:8px 14px;border-radius:8px;margin-bottom:12px;font-size:13px}
 .grid{display:grid;gap:12px}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:8px}
@@ -113,9 +117,10 @@ details.more>summary:before{content:'▸ '}details.more[open]>summary:before{con
 <body>
 <nav>
   <span class="logo">🌿 趋势识别 · 多/空/震荡</span>
-  <a href="/" class="{{ 'on' if active=='home' }}">趋势仪表盘</a>
+  <a href="/" class="{{ 'on' if active=='home' }}">股价趋势</a>
+  <a href="/sell" class="{{ 'on' if active in ('sell','sell_stocks','sell_backtest') }}">卖出预警</a>
   <a href="/stocks" class="{{ 'on' if active=='stocks' }}">股票清单</a>
-  <a href="/market" class="{{ 'on' if active=='market' }}">行情波段</a>
+  <a href="/market" class="{{ 'on' if active=='market' }}">股票行情</a>
   <a href="/settings" class="{{ 'on' if active=='settings' }}">设置</a>
   <a href="/doc" class="{{ 'on' if active=='doc' }}">需求文档</a>
 </nav>

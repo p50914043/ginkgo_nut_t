@@ -1,5 +1,5 @@
 /* 三态K线绘图（行情页与个股详情页共用）
- * 一张图里同时说明：均线定出的三态波段背景、趋势切换点、量能 / ADX / MACD 副图。
+ * 一张图里同时说明：均线定出的三态波段背景、趋势切换点、量能 / ADX / MACD（详情页）或 RSI（行情页）副图。
  * 数据来源：app.py 的 _chart_bundle()（行情页）与 /api/kline/<code>（详情页），字段同名。
  * 只做行情识别展示 + 今日区间纪律提示（震荡段 %B 上下沿价位 / 硬止损位），不画历史买卖点。
  */
@@ -17,11 +17,12 @@ function renderKChart(el, c) {
   });
   (c.flips || []).forEach(function (f) { flipByDate[f.date] = f; });
   var nArea = (c.areas || []).length;
+  var isRsi = (c.sub4 === 'rsi');       // 第4副图：行情页给 RSI，详情页未设标记仍走 MACD
   var hh = 540;
   var grids = [], xAxes = [], yAxes = [], series = [];
   var top = [30, 0.56 * hh, 0.70 * hh, 0.84 * hh];
   var hgt = ['42%', '11%', '11%', '11%'];
-  var names = ['K线', '量能', 'ADX', 'MACD'];
+  var names = ['K线', '量能', 'ADX', isRsi ? 'RSI' : 'MACD'];
   for (var g = 0; g < 4; g++) {
     grids.push({left: 58, right: 16, top: top[g], height: hgt[g]});
     xAxes.push({type: 'category', data: c.dates, boundaryGap: true, gridIndex: g,
@@ -31,6 +32,7 @@ function renderKChart(el, c) {
                 axisLabel: {show: g === 0, fontSize: 11},
                 splitLine: {show: true, lineStyle: {color: '#f0f2f6'}}});
   }
+  if (isRsi) { yAxes[3].min = 0; yAxes[3].max = 100; yAxes[3].scale = false; }
   // 三态波段背景（markArea 的两端必须是真实日期，已由 _regime_paint 保证）
   var maData = (c.areas || []).map(function (a) {
     return [{xAxis: a.x0, itemStyle: {color: a.fill},
@@ -92,14 +94,26 @@ function renderKChart(el, c) {
                           data: [{yAxis: (c.adx_min === undefined || c.adx_min === null) ? 25
                                         : c.adx_min,
                                  lineStyle: {color: '#cbd5e1', type: 'dashed'}}]}});
-  series.push({name: 'MACD柱', type: 'bar', xAxisIndex: 3, yAxisIndex: 3,
-               data: (c.hist || []).map(function (v) {
-                 return {value: v, itemStyle: {color: v >= 0 ? '#ef5350' : '#26a69a'}};
-               })});
-  series.push({name: 'DIF', type: 'line', data: c.dif, xAxisIndex: 3, yAxisIndex: 3,
-               showSymbol: false, lineStyle: {color: '#111827', width: 1}});
-  series.push({name: 'DEA', type: 'line', data: c.dea, xAxisIndex: 3, yAxisIndex: 3,
-               showSymbol: false, lineStyle: {color: '#f59e0b', width: 1}});
+  if (isRsi) {
+    series.push({name: 'RSI', type: 'line', data: c.rsi, xAxisIndex: 3, yAxisIndex: 3,
+                 showSymbol: false, lineStyle: {color: '#7c3aed', width: 1},
+                 areaStyle: {color: 'rgba(124,58,237,0.06)'},
+                 markLine: {silent: true, symbol: 'none',
+                            label: {show: true, position: 'insideEndTop', fontSize: 9},
+                            data: [{yAxis: 70, lineStyle: {color: '#ef5350', type: 'dashed'},
+                                    label: {formatter: '70 超买', color: '#ef5350'}},
+                                   {yAxis: 30, lineStyle: {color: '#26a69a', type: 'dashed'},
+                                    label: {formatter: '30 超卖', color: '#26a69a'}}]}});
+  } else {
+    series.push({name: 'MACD柱', type: 'bar', xAxisIndex: 3, yAxisIndex: 3,
+                 data: (c.hist || []).map(function (v) {
+                   return {value: v, itemStyle: {color: v >= 0 ? '#ef5350' : '#26a69a'}};
+                 })});
+    series.push({name: 'DIF', type: 'line', data: c.dif, xAxisIndex: 3, yAxisIndex: 3,
+                 showSymbol: false, lineStyle: {color: '#111827', width: 1}});
+    series.push({name: 'DEA', type: 'line', data: c.dea, xAxisIndex: 3, yAxisIndex: 3,
+                 showSymbol: false, lineStyle: {color: '#f59e0b', width: 1}});
+  }
 
   var fmt = function (ps) {
     var arr = (ps && ps.length) ? ps : [ps];
@@ -131,8 +145,9 @@ function renderKChart(el, c) {
          '　区间位置 %B ' + kg(c.pctb ? c.pctb[i] : null) +
          '　ADX ' + kg(c.adx[i]) + (c.adx_min ? '(强档>' + kg(c.adx_min) + ')' : '') +
          '　ATR ' + kg(c.atr[i]);
-    t += '<br>MACD ' + kg(c.dif[i]) + ' / ' + kg(c.dea[i]) + ' 柱 ' + kg(c.hist[i]) +
-         '　量能 ' + kg(c.vol[i]);
+    t += isRsi ? ('<br>RSI(14) ' + kg(c.rsi[i]))
+               : ('<br>MACD ' + kg(c.dif[i]) + ' / ' + kg(c.dea[i]) + ' 柱 ' + kg(c.hist[i]));
+    t += '　量能 ' + kg(c.vol[i]);
     return t;
   };
   var chart = echarts.init(el);

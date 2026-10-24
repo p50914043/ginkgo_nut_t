@@ -1,0 +1,54 @@
+{# 飞书通知配置块（只出现在设置页；三态判定与做T提示参数在股价趋势页折叠区的 _settings_judgment.html）
+   需要上下文：cfg、rg=cfg['regime']（保存 Webhook 时用它带隐藏字段回传，避免清空三态参数）；settings_next 决定保存后跳回哪里。 #}
+{% set rg = rg | default(cfg.get('regime') or {}) %}
+<div class="card">
+  <h2>飞书通知</h2>
+  <p class="muted">当前生效通道：<b>{{ notifier_desc }}</b>　个人使用推荐“企业自建应用机器人”（可私聊直达，无需建群拉机器人）。</p>
+
+  <h3>方式一：应用机器人（自建应用）</h3>
+  <form method="post" action="{{ url_for('notify_setup') }}" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px">
+    <label title="{{ ph.get('notify_channel') }}">通道选择
+      <select name="notify_channel" style="width:100%">
+        <option value="auto" {{ 'selected' if cfg.notify_channel=='auto' }}>自动（优先应用机器人）</option>
+        <option value="app_bot" {{ 'selected' if cfg.notify_channel=='app_bot' }}>仅应用机器人</option>
+        <option value="webhook" {{ 'selected' if cfg.notify_channel=='webhook' }}>仅群机器人 Webhook</option>
+      </select>
+    </label>
+    <label title="{{ ph.get('feishu_app_id') }}">App ID<input name="feishu_app_id" type="text" value="{{ cfg.feishu_app_id }}" style="width:100%" placeholder="cli_xxxx"></label>
+    <label title="{{ ph.get('feishu_app_secret') }}">App Secret<input name="feishu_app_secret" type="text" value="{{ cfg.feishu_app_secret }}" style="width:100%" placeholder="应用凭证里的 App Secret"></label>
+    <label title="{{ ph.get('feishu_receive_id') }}">接收者 ID<input name="feishu_receive_id" type="text" value="{{ cfg.feishu_receive_id }}" style="width:100%" placeholder="ou_xxx(个人) 或 oc_xxx(群)"></label>
+    <label title="{{ ph.get('feishu_receive_id_type') }}">接收者 ID 类型
+      <select name="feishu_receive_id_type" style="width:100%">
+        {% for t in ['open_id','user_id','union_id','chat_id'] %}
+        <option value="{{ t }}" {{ 'selected' if cfg.feishu_receive_id_type==t }}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label title="仅用于探测：填手机号换取 open_id，不保存">探测用手机号（空格分隔，可空）<input name="probe_mobiles" type="text" style="width:100%" placeholder="13800000000"></label>
+    <div style="grid-column:1/-1;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn pri" name="probe_send" value="0">保存并测试连接</button>
+      <button class="btn" name="probe_send" value="1">保存并发一条测试消息</button>
+      <span class="muted">需应用开通权限：im:message（发消息）、im:chat（读群列表）、contact 手机号换ID</span>
+    </div>
+  </form>
+
+  <h3 style="margin-top:18px">方式二：群机器人 Webhook</h3>
+  <form method="post" action="{{ url_for('settings_page') }}" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px">
+    <input type="hidden" name="next" value="{{ settings_next or '/settings' }}">
+    <input type="hidden" name="regime_present" value="1">
+    <input type="hidden" name="auto_run_present" value="1">
+    <input type="hidden" name="ma_fast" value="{{ rg.ma_fast }}">
+    <input type="hidden" name="ma_slow" value="{{ rg.ma_slow }}">
+    <input type="hidden" name="slope_min" value="{{ rg.slope_min }}">
+    <input type="hidden" name="adx_min" value="{{ rg.adx_min }}">
+    <input type="hidden" name="confirm_days" value="{{ rg.confirm_days }}">
+    <input type="hidden" name="spike_days" value="{{ rg.spike_days }}">
+    <input type="hidden" name="auto_run_enabled" value="{{ 'on' if cfg.auto_run_enabled else '' }}">
+    <input type="hidden" name="auto_run_retry" value="{{ 'on' if cfg.auto_run_retry else '' }}">
+    <input type="hidden" name="auto_run_time" value="{{ cfg.auto_run_time }}">
+    <label style="grid-column:1/-1" title="{{ ph.get('feishu_webhook') }}">Webhook 地址<input name="feishu_webhook" type="text" value="{{ cfg.feishu_webhook }}" style="width:100%" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."></label>
+    <label style="grid-column:1/-1" title="{{ ph.get('feishu_webhook_secret') }}">加签密钥（未启用签名则留空）<input name="feishu_webhook_secret" type="text" value="{{ cfg.feishu_webhook_secret }}" style="width:100%"></label>
+    <div><button class="btn pri">保存 Webhook</button></div>
+  </form>
+  <p class="muted">提示：App Secret 以明文存在 config.yaml，请勿提交到公开仓库。这个表单带着隐藏字段，是为了保存 Webhook 时不会把三态参数与自动运行设置清空。</p>
+</div>

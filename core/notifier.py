@@ -274,3 +274,39 @@ def format_trend_message(date_str, trend, title_tag='趋势播报'):
 
 def _px(v):
     return ('%.2f' % v) if v else '-'
+
+
+SELL_TITLE = '卖出通知工具｜估值/基本面/行业/社保与保险持仓 四路风险预警（只提示，不接管下单）'
+
+
+def format_sell_message(date_str, report, title_tag='卖出预警'):
+    """卖出预警推送：逐只列命中信号与依据；无预警时也要说一句，避免静默难辨。
+
+    report 是 sellscan.scan_sell 的结果；只出风险预警，不算收益、不给仓位金额。
+    """
+    report = report or {}
+    if report.get('disabled'):
+        return ['%s %s｜工具已在因子配置中关闭，无内容可播' % (date_str, title_tag)]
+    alerts = report.get('alerts') or []
+    lines = ['%s %s｜🔴 红 %d · 🟡 黄 %d（共 %d 只在监控）｜只提示风险，不接管下单' % (
+        date_str, title_tag, report.get('n_red', 0), report.get('n_yellow', 0),
+        len(report.get('rows') or []))]
+    from . import sellscan as _ss
+    for r in alerts:
+        q = r.get('quote') or {}
+        lines.append('%s %s %s 收盘 %s%s' % (
+            _ss.LEVEL_MARK.get(r['level'], ''), r['name'], r['code'],
+            _px(q.get('close')), _chg(q.get('chg_pct'))))
+        for k in 'abcd':
+            sig = r.get(k) or {}
+            if sig.get('level') and sig['level'] != 'none':
+                lines.append('   %s｜%s' % (_ss.SIG_CN.get(k.upper(), k.upper()),
+                                             sig.get('detail', '')))
+    if not alerts:
+        lines.append('今日无预警：%d 只标的四路信号均未触发' % len(report.get('rows') or []))
+    errors = [r for r in (report.get('rows') or []) if r.get('error')]
+    if errors:
+        lines.append('--- 数据异常：%s ---' % '、'.join(
+            '%s(%s)' % (e['name'], e['error'][:30]) for e in errors))
+    lines.append('--- 数据截至 %s · 分位窗口与阈值见网页 /sell ---' % (date_str or '-'))
+    return lines

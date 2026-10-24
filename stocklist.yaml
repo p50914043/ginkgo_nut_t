@@ -1,20 +1,55 @@
 - code: '600741'
   name: 华域汽车
+  type: cycle
+  index: ''
+  enabled: true
 - code: '601318'
   name: 中国平安
+  type: insurance
+  index: '1.000300'
+  enabled: true
 - code: 000792
   name: 盐湖股份
+  type: cycle
+  index: ''
+  enabled: true
 - code: '600887'
   name: 伊利股份
+  type: value
+  index: ''
+  enabled: true
 - code: '600941'
   name: 中国移动
+  type: value
+  index: ''
+  enabled: true
 - code: '600585'
   name: 海螺水泥
+  type: cycle
+  index: ''
+  enabled: true
 - code: '000543'
   name: 皖能电力
+  type: cycle
+  index: ''
+  enabled: true
 - code: '002714'
   name: 牧原股份
+  type: cycle
+  index: ''
+  enabled: true
 - code: 000807
   name: 云铝股份
+  type: cycle
+  index: ''
+  enabled: true
 - code: '601899'
   name: 紫金矿业
+  type: cycle
+  index: ''
+  enabled: true
+- code: '601668'
+  name: 中国建筑
+  type: cycle
+  index: ''
+  enabled: true

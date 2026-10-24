@@ -11,7 +11,7 @@ import threading
 
 from . import config
 from . import scan as scan_mod
-from .notifier import push, format_trend_message
+from .notifier import push, format_trend_message, format_sell_message, SELL_TITLE
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_PATH = os.path.join(BASE_DIR, 'data', 'autorun_state.json')
@@ -97,6 +97,50 @@ def latest_data_date(results):
     return max(dates) if dates else None
 
 
+def push_sell_alert(cfg=None, dry_run=False):
+    """盘后自动任务在趋势播报之后追发的卖出预警：仅当出现红/黄信号时才推（0 预警当天不打扰）。
+    受 sell_notify.enabled 总开关控制；扫描失败只记日志、不影响趋势播报。"""
+    cfg = cfg or config.load_config()
+    sn = cfg.get('sell_notify') or {}
+    st = load_state()
+    now = _now().strftime('%Y-%m-%d %H:%M:%S')
+
+    def _record(pushed, n_alerts, note):
+        st.update(last_sell_pushed=pushed, last_sell_alerts=n_alerts,
+                  last_sell_note=note, last_sell_at=now)
+        save_state(st)
+
+    if not sn.get('enabled', True):
+        _record(False, 0, '开关关闭')
+        _log('卖出预警：sell_notify 开关关闭，跳过')
+        return {'pushed': False, 'skipped': True, 'reason': '开关关闭', 'n_alerts': 0}
+    try:
+        from . import sellscan
+        rep = sellscan.scan_sell(cfg, refresh=False)
+    except Exception as e:
+        _record(False, 0, '扫描失败 %s' % str(e)[:40])
+        _log('卖出预警：扫描失败 %s: %s' % (type(e).__name__, str(e)[:120]))
+        return {'pushed': False, 'error': str(e)[:120], 'n_alerts': 0}
+    alerts = rep.get('alerts') or []
+    n_red, n_yellow = rep.get('n_red', 0), rep.get('n_yellow', 0)
+    if rep.get('disabled') or not alerts:
+        note = '无触发（监控%d只）' % rep.get('n_monitor', 0)
+        _record(False, 0, note)
+        _log('卖出预警：%s，跳过推送' % note)
+        return {'pushed': False, 'skipped': True, 'reason': '今日无红/黄预警',
+                'n_alerts': 0, 'n_monitor': rep.get('n_monitor', 0)}
+    note = '红%d/黄%d 共%d只' % (n_red, n_yellow, len(alerts))
+    lines = format_sell_message(rep.get('date'), rep)
+    res = push(SELL_TITLE, lines, cfg, dry_run=dry_run)
+    ok = res.get('code') == 0
+    pushed = ok and res.get('msg') != 'dry_run'
+    _record(pushed, len(alerts), note)
+    _log('卖出预警%s: %s -> 通道 %s code=%s' % (
+        '(dry)' if dry_run else '', note, res.get('channel', '-'), res.get('code')))
+    return {'pushed': pushed, 'skipped': False, 'n_alerts': len(alerts),
+            'n_red': n_red, 'n_yellow': n_yellow, 'result': res}
+
+
 # ---------- 执行 ----------
 
 def run_once(cfg=None, force=False, manual=False):
@@ -160,7 +204,10 @@ def loop(interval=30):
             cfg = config.load_config()          # 每轮重读，页面改开关立即生效
             due, why = should_run(cfg=cfg)
             if due:
-                run_once(cfg)
+                r = run_once(cfg)
+                # 趋势播报后追发卖出预警（仅交易日、有红/黄才推）
+                if not r.get('skipped'):
+                    push_sell_alert(cfg)
         except Exception as e:
             _log('自动运行异常: %s: %s' % (type(e).__name__, e))
         _stop.wait(interval)
@@ -207,5 +254,9 @@ def status(cfg=None):
             'last_result': st.get('last_result', '尚未运行'),
             'last_detail': st.get('last_detail', '-'),
             'last_rows': st.get('last_rows', 0),
+            'sell_enabled': bool((cfg.get('sell_notify') or {}).get('enabled', True)),
+            'last_sell_pushed': bool(st.get('last_sell_pushed', False)),
+            'last_sell_alerts': st.get('last_sell_alerts', 0),
+            'last_sell_note': st.get('last_sell_note', '-'),
             'next': ('今日 %s' % cfg.get('auto_run_time')) if due or why.startswith('未到') else '-',
             'why': why}

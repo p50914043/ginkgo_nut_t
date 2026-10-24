@@ -24,16 +24,17 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify, f
 
 from core import data, config, regime, scan as scan_mod, tips
 from core import autorun
+from core import sellscan, selldata
 from core.indicators import compute_factors, snapshot as ind_snapshot
-from core.notifier import push as notify_push, format_trend_message, describe_channel
+from core.notifier import (push as notify_push, format_trend_message, describe_channel,
+                           format_sell_message, SELL_TITLE)
 from core import notifier
 
 app = Flask(__name__)
 app.secret_key = 'ginkgo-nut-t'
 DOC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '需求文档.md')
 
-# 图表口径：行情页每只票最多画多少根、详情页窗口多少根、最多画几只
-CHART_BARS = 400
+# 图表口径：详情页窗口多少根、行情页最多画几只（行情页 K 线根数 = 所选 start~end 区间，不截断）
 DETAIL_BARS = 250
 MAX_CHARTS = 9
 
@@ -43,6 +44,11 @@ REGIME_INT_KEYS = ('ma_fast', 'ma_slow', 'confirm_days', 'spike_days')
 # 提示层参数（%B 上下沿与回踩容差是浮点，持有日数取整）
 TIP_NUM_KEYS = ('buy_pctb', 'sell_pctb', 'stop_pct', 'max_hold', 'pb_touch', 'vol_shrink')
 TIP_INT_KEYS = ('max_hold',)
+# 卖出通知工具的分位与阈值参数
+SELL_NUM_KEYS = ('a_yellow', 'a_red', 'b_ocf_ratio', 'b_debt_up', 'b_growth_gap',
+                 'b_div_drop', 'c_dd_pct')
+SELL_INT_KEYS = ('a_years_pe', 'a_years_pb', 'b_roe_years', 'b_red_groups',
+                 'c_dd_days', 'c_warn_days', 'c_warn_peers', 'bt_years')
 
 
 def _form_section(form, keys, int_keys, base):
@@ -83,8 +89,26 @@ PARAM_HELP = {
     'feishu_app_secret': '企业自建应用 App Secret，明文存在 config.yaml，勿提交公开仓库。',
     'feishu_receive_id': '消息接收者 ID：个人 open_id(ou_xxx) 或群 chat_id(oc_xxx)。',
     'feishu_receive_id_type': '接收者 ID 的类型，需与 feishu_receive_id 对应。',
+    # ---- 卖出通知工具（/sell 因子配置页）----
+    'sell_enabled': '总开关：关闭后 /sell 页不再扫描，推送提示“无内容可播”；不影响趋势识别主功能。',
+    'a_yellow': '信号 A 黄色预警线：估值在回看窗口内的历史分位 ≥ 此值（%）提示黄色。分位 = 窗口内低于当前值的交易日占比。',
+    'a_red': '信号 A 红色预警线：历史分位 ≥ 此值（%）升为红色。建议高于黄线，两线相等时黄线失效。',
+    'a_years_pe': 'PE / PB（代理PEV）分位回看年数：窗口越长，“高估”的参照系越旧。',
+    'a_years_pb': 'PB 分位回看年数：银行/周期股用 10 年窗口，避开单一牛市高点干扰。',
+    'b_ocf_ratio': '经营现金流/净利润 阈值：连续 2 个报告期低于它，说明利润里没有现金，计入第1组命中。净利润≤0 的期间不计入连续判定。',
+    'b_debt_up': '资产负债率同比升幅阈值（百分点）：最新报告期较上年同期升超它，计入第2组。',
+    'b_growth_gap': '应收+存货平均增速超营收增速的Gap（百分点）：扩大它→容忍度更高，只抓最悬殊的膨胀。',
+    'b_roe_years': 'ROE 连降判定用的年报份数：3 = 最近三个年报逐级下降且低于行业均值（清单内同行业平均，样本有限）。',
+    'b_div_drop': '分红降幅阈值（%）：最近一个已披露完整财年对比上一个有分红年度，总额降超它或取消→计入第3组。只比完整财年，避免中期分红被错当陡降。',
+    'b_red_groups': 'B 信号升红色的命中组数：默认 3（三组全中才红），任一组命中即黄色。',
+    'c_dd_pct': '行业指数回撤阈值（%）：自回看窗口内最高点回撤超它，条件①成立。',
+    'c_dd_days': '“近期高点”的回看交易日数：默认 250 ≈ 一年。',
+    'c_warn_days': '业绩预警公告的回看自然日数：只算这段时间内发过的预警。',
+    'c_warn_peers': '“同行多家”的家数门槛：清单内同行业（不含本票）发预亏/预减类预警的公司数 ≥ 它，条件②成立。两条件同时成立才黄色预警。',
+    'd_on': '信号 D 开关：比较最近两个季度末的十大流通股东，社保/保险机构减持或退出十大数据 → 黄色。仅覆盖十大，未进十大的机构变动看不到。',
+    'bt_years': '历史回测默认年数：回测只复盘“预警当时是否成立”，附事件后 5/10/20 个交易日涨跌作参考，不是收益承诺。',
+    'sell_index': '行业指数代码：沪市/中证系列写 1.000300（或 sh.000300），深市/国证写 399xxx；留空默认沪深300。同行按东财行业板块名匹配，只统计监控清单内的公司。',
 }
-
 
 @app.template_filter('num')
 def num_filter(v, fmt='%.2f'):
@@ -130,7 +154,8 @@ def dashboard():
     return render_template('index.html', results=out['results'],
                            trend=scan_mod.build_trend_report(out),
                            fstats=scan_mod.flip_stats(out['stocks'], out['dfs'], out['cfg']),
-                           cfg=out['cfg'])
+                           cfg=out['cfg'], rg=(out['cfg'].get('regime') or {}),
+                           tt=(out['cfg'].get('t_trade') or {}))
 
 
 @app.route('/stocks', methods=['GET', 'POST'])
@@ -144,7 +169,10 @@ def stocks_page():
                 mk, num = data.to_secid(code).split('.')
                 code = num
                 name = (request.form.get('name') or '').strip() or data.get_name(num)
-                stocks.append({'code': code, 'name': name})
+                stype = request.form.get('type') if request.form.get('type') in config.SELL_TYPES else 'value'
+                stocks.append({'code': code, 'name': name, 'type': stype,
+                               'index': (request.form.get('index') or '').strip(),
+                               'enabled': request.form.get('enabled') == 'on'})
                 config.save_stocks(stocks)
                 flash('已添加 %s %s' % (code, name))
             except Exception as e:
@@ -162,8 +190,22 @@ def stocks_page():
                     s['name'] = name
             config.save_stocks(stocks)
             flash('已更新 %s' % code)
+        elif action == 'update_all':
+            # 整表一次性提交（name_/type_/index_/enabled_ 按 code 命名，勾选框缺席即不纳入卖出预警）
+            for s in stocks:
+                c = s['code']
+                nm = (request.form.get('name_' + c) or '').strip()
+                if nm:
+                    s['name'] = nm
+                if request.form.get('type_' + c) in config.SELL_TYPES:
+                    s['type'] = request.form.get('type_' + c)
+                s['index'] = (request.form.get('index_' + c) or '').strip()
+                s['enabled'] = request.form.get('enabled_' + c) == 'on'
+            config.save_stocks(stocks)
+            flash('清单修改已保存')
         return redirect(url_for('stocks_page'))
-    return render_template('stocks.html', stocks=stocks)
+    return render_template('stocks.html', stocks=stocks,
+                           types=list(config.SELL_TYPES), type_cn=sellscan.TYPE_CN)
 
 
 @app.route('/settings', methods=['GET', 'POST'])
@@ -192,7 +234,7 @@ def settings_page():
         config.save_config(cfg)
         autorun.start(cfg)          # 开关改动立即生效
         flash('参数已保存')
-        return redirect(url_for('settings_page'))
+        return redirect(request.form.get('next') or url_for('settings_page'))
     return render_template('settings.html', cfg=cfg, rg=cfg.get('regime') or {},
                            tt=cfg.get('t_trade') or {})
 
@@ -348,15 +390,16 @@ def _tip_pack(df, cfg):
     return out
 
 
-def _chart_bundle(stocks, dfs, start, end, cfg, max_bars=CHART_BARS, max_charts=MAX_CHARTS):
-    """行情页K线：K线 + 三均线/布林 + 三态波段与切换点 + ADX/MACD/量能"""
+def _chart_bundle(stocks, dfs, start, end, cfg, max_charts=MAX_CHARTS):
+    """股票行情页K线：K线 + 三均线/布林 + 三态波段与切换点 + ADX/RSI/量能（第4副图给 RSI）
+    画图范围严格等于所选 start~end 区间（不再截断到最近 N 根）"""
     bundles = []
     for st in stocks[:max_charts]:
         df = dfs.get(st['code'])
         if df is None or not df.size:
             continue
         dates_all = list(df['date'])
-        pos = [i for i, d in enumerate(dates_all) if start <= d <= end][-max_bars:]
+        pos = [i for i, d in enumerate(dates_all) if start <= d <= end]
         if not pos:
             continue
         codes_all, _raw, flags_all = regime.regime_full(df, cfg)
@@ -387,6 +430,7 @@ def _chart_bundle(stocks, dfs, start, end, cfg, max_bars=CHART_BARS, max_charts=
             'vol': [int(x) for x in d['volume']],
             'dif': _nan2none(d['dif'], 4), 'dea': _nan2none(d['dea'], 4),
             'hist': _nan2none(d['macd_hist'], 4),
+            'rsi': _nan2none(d['rsi14'], 1), 'sub4': 'rsi',
             'areas': areas, 'flips': flips,
             'adx_min': regime.rcfg(cfg)['adx_min'],
             'tip': _tip_pack(df, cfg),
@@ -423,7 +467,7 @@ def market_page():
 
 @app.route('/backtest')
 def backtest_alias():
-    """旧地址兼容：回测页已改造为“行情波段”页"""
+    """旧地址兼容：回测页已改造为“股票行情”页"""
     return redirect(url_for('market_page'))
 
 
@@ -612,10 +656,97 @@ def autorun_route():
     elif action == 'run':
         try:
             r = autorun.run_once(cfg, force=True, manual=True)
-            flash('手动运行完成：%s' % r.get('summary', r.get('data_date')))
+            extra = ''
+            if not r.get('skipped'):
+                sr = autorun.push_sell_alert(cfg)
+                if sr.get('pushed'):
+                    extra = '｜卖出预警已推 %d 只（红%d/黄%d）' % (
+                        sr.get('n_alerts', 0), sr.get('n_red', 0), sr.get('n_yellow', 0))
+                else:
+                    extra = '｜卖出预警：%s' % (sr.get('reason') or sr.get('error') or '未推')
+            flash('手动运行完成：%s%s' % (r.get('summary', r.get('data_date')), extra))
         except Exception as e:
             flash('手动运行失败: %s: %s' % (type(e).__name__, e))
     return redirect(request.form.get('next') or url_for('dashboard'))
+
+
+# ---------------- 卖出通知工具（独立页群：预警总览 / 因子配置 / 监控清单 / 历史回测） ----------------
+
+def _sell_cfg_from_form(form, cfg):
+    """只有带 sell_present 标记时才改 sell_notify 段；空/非法值不动原配置（与三态/提示层同一约定）"""
+    sn = _form_section(form, SELL_NUM_KEYS, SELL_INT_KEYS, cfg.get('sell_notify'))
+    sn.update(_form_section(form, SELL_INT_KEYS, SELL_INT_KEYS, sn))
+    sn['enabled'] = form.get('sell_enabled') == 'on'
+    sn['d_on'] = form.get('sell_d_on') == 'on'
+    out = dict(cfg)
+    out['sell_notify'] = sn
+    return out
+
+
+@app.route('/sell')
+def sell_page():
+    """卖出信号监控（单页）：四路信号逐票卡片 + 可折叠配置（因子阈值/通知） + 回测/清单入口
+    首次拉数据较慢，当日缓存后秒开；?refresh=1 强制重拉"""
+    rep = sellscan.scan_sell(refresh=request.args.get('refresh') == '1')
+    preview = format_sell_message(rep.get('date'), rep)
+    return render_template('sell.html', rep=rep, preview=preview,
+                           logs=sellscan.read_log(5), sn=rep['cfg'].get('sell_notify') or {})
+
+
+@app.route('/sell/send', methods=['POST'])
+def sell_send():
+    """把当前预警推飞书：dry=1 只生成预览；两者都写入发送记录供网页展示"""
+    dry = request.form.get('dry') == '1'
+    rep = sellscan.scan_sell(refresh=False)
+    lines = format_sell_message(rep.get('date'), rep)
+    result = notify_push(SELL_TITLE, lines, rep['cfg'], dry_run=dry)
+    text = SELL_TITLE + '\n' + '\n'.join(lines)
+    ch = describe_channel(rep['cfg'])
+    ok = result.get('code') == 0
+    sellscan.append_log({'ts': sellscan.datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                         'dry': dry, 'ok': ok, 'code': result.get('code'),
+                         'msg': str(result.get('msg', ''))[:80],
+                         'channel': result.get('channel', ch), 'text': text})
+    if dry:
+        flash('dry-run 预览已生成并记入发送历史（通道:%s，未真推送）' % ch)
+    elif ok:
+        flash('已发送卖出预警到飞书（通道:%s），预警 %d 只' % (
+            result.get('channel', ch), len(rep.get('alerts') or [])))
+    else:
+        flash('发送失败 code=%s msg=%s（通道:%s）' % (result.get('code'), result.get('msg'), ch))
+    return redirect(url_for('sell_page'))
+
+
+@app.route('/sell/factors', methods=['GET', 'POST'])
+def sell_factors_page():
+    """因子配置已并入 /sell 的可折叠区；本路由只负责保存后跳回总览页（GET 直接回总览）"""
+    if request.method == 'POST' and 'sell_present' in request.form:
+        cfg = config.load_config()
+        cfg = _sell_cfg_from_form(request.form, cfg)
+        config.save_config(cfg)
+        flash('因子配置已保存，重扫后生效')
+    return redirect(url_for('sell_page'))
+
+
+@app.route('/sell/backtest', methods=['GET', 'POST'])
+def sell_backtest_page():
+    """历史回测：复盘四路信号在过去何时进入预警，附事件后 5/10/20 个交易日涨跌作有效性参考"""
+    form, bt = {}, None
+    if request.method == 'POST':
+        form = request.form.to_dict()
+        codes = request.form.getlist('codes') or None
+        try:
+            years = int(form.get('years') or 0) or None
+        except ValueError:
+            years = None
+        try:
+            bt = sellscan.backtest(codes=codes, years=years)
+        except Exception as e:
+            flash('回测失败：%s: %s' % (type(e).__name__, e))
+    cfg = config.load_config()
+    sn = cfg.get('sell_notify') or {}
+    return render_template('sell_backtest.html', bt=bt, form=form,
+                           stocks=config.load_stocks(), sn=sn)
 
 
 if __name__ == '__main__':

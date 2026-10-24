@@ -72,7 +72,7 @@
       同为历史统计，两者都<b>不构成收益承诺</b>。</p>
     {% else %}
     <p class="muted" style="margin:8px 0 0">上面“给定”是需求里带来的历史结论（7 只大盘股样本）；
-      本页不重算行情，<b>实测数字</b>见<a href="/">趋势仪表盘</a>与<a href="/market">行情波段页</a>（随参数一起变）。</p>
+      本页不重算行情，<b>实测数字</b>见<a href="/">股价趋势</a>与<a href="/market">股票行情页</a>（随参数一起变）。</p>
     {% endif %}
     <ul class="muted" style="margin:10px 0 0;padding-left:20px;line-height:1.8">
       <li><b>🔴🔴 强信号｜震荡 → 趋势</b>：方向确立，简报里排在最前、单独成节。</li>
@@ -99,7 +99,7 @@
         MA20 与慢线与斜率 / ADX，震荡段附加 %B）→ 分级切换 → 🎯 提示与 🔵 区间持仓中 → 酝酿中 → 未纳入判定。</li>
       <li><b>手动入口</b>：本页“更新数据并重新扫描 / 发送飞书播报 / 立即运行一次”，dry 预览只生成文本不发送。</li>
       <li><b>参数生效范围</b>：<a href="/settings">设置页</a>保存即全局生效并落盘 <code>config.yaml</code>；
-        <a href="/market">行情波段页</a>现场填的参数只影响本次查询，不落盘。实测分级统计随参数一起变。</li>
+        <a href="/market">股票行情页</a>现场填的参数只影响本次查询，不落盘。实测分级统计随参数一起变。</li>
       <li><b>数据与排查</b>：日线来自新浪接口（前复权，失败时退化为不复权），本地缓存并增量更新；
         日志 <code>autorun.log</code>，最近状态 <code>data/autorun_state.json</code>，自动运行需保持服务在跑（<code>run.sh</code>）。</li>
     </ul>

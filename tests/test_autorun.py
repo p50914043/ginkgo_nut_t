@@ -194,6 +194,35 @@ def test_parse_hhmm():
     assert autorun.parse_hhmm('') is None
 
 
+def test_push_sell_alert_only_when_alerts(monkeypatch):
+    """卖出预警自动追发：开关关闭/无红黄→跳过不推；有红黄→推一条并写状态"""
+    from core import sellscan
+    monkeypatch.setattr(autorun, 'format_sell_message', lambda d, rep, **k: ['x'])
+    calls = []
+    monkeypatch.setattr(autorun, 'push',
+                        lambda *a, **k: calls.append(a) or {'code': 0, 'msg': 'ok', 'channel': 'webhook'})
+    # 1) 总开关关闭 → 跳过，且不扫描
+    monkeypatch.setattr(sellscan, 'scan_sell',
+                        lambda cfg=None, refresh=False: (_ for _ in ()).throw(RuntimeError('不应扫描')))
+    r = autorun.push_sell_alert(cfg(sell_notify={'enabled': False}))
+    assert r['skipped'] and r['reason'] == '开关关闭' and calls == []
+    # 2) 有监控无红/黄 → 跳过不推
+    monkeypatch.setattr(sellscan, 'scan_sell', lambda cfg=None, refresh=False: {
+        'disabled': False, 'alerts': [], 'n_red': 0, 'n_yellow': 0, 'n_monitor': 11, 'date': '2026-10-19'})
+    r = autorun.push_sell_alert(cfg())
+    assert r['skipped'] and r['reason'] == '今日无红/黄预警' and calls == []
+    # 3) 出现红/黄 → 推一条并落状态
+    monkeypatch.setattr(sellscan, 'scan_sell', lambda cfg=None, refresh=False: {
+        'disabled': False, 'alerts': [{'code': '600000'}], 'n_red': 1, 'n_yellow': 2,
+        'n_monitor': 11, 'date': '2026-10-19'})
+    r = autorun.push_sell_alert(cfg())
+    assert r['pushed'] and r['n_alerts'] == 1 and len(calls) == 1
+    assert calls[0][0] == autorun.SELL_TITLE
+    st = autorun.load_state()
+    assert st['last_sell_pushed'] is True and st['last_sell_alerts'] == 1
+    assert '红1/黄2' in st['last_sell_note']
+
+
 def test_status_shape_without_thread():
     st = autorun.status(cfg(auto_run_enabled=False, auto_run_time='15:30'))
     assert st['enabled'] is False and st['alive'] is False

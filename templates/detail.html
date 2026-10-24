@@ -45,7 +45,7 @@
     <div class="prow" title="本段波段的高低点（区间内最高价/最低价）"><span>本波段高低</span><span class="pv">{{ (rgsnap.segment or {}).get('hi')|num }} / {{ (rgsnap.segment or {}).get('lo')|num }}</span></div>
     <div class="prow" title="%B = (收盘 − 下轨) / (上轨 − 下轨)：不参与三态判定，只用于震荡段的区间定位"><span>区间位置 %B</span><span class="pv">{{ ind.pctb|num('%.2f') }}</span></div>
   </div>
-  <p class="muted"><b>{{ rgsnap.level_cn or rgsnap.label_cn }}</b> 的含义：{{ rgsnap.desc }}。判据（四条全满足 = <b>强</b>）：收盘 &gt; MA20 且 MA20 &gt; MA{{ rgsnap.ma_slow }} 且斜率 &gt; +{{ rgsnap.slope_min }}% 且 ADX &gt; {{ rgsnap.adx_min|int }} → <b>多头</b>；完全反向 → <b>空头</b>；只满足“收盘在 MA20 一侧 + 斜率同向” → <b>弱多/弱空</b>；其余 → <b>震荡</b>。参数可在<a href="/settings">设置页</a>改，这里的波段划分与仪表盘、飞书播报、<a href="/market">行情波段页</a>读同一份结果。</p>
+  <p class="muted"><b>{{ rgsnap.level_cn or rgsnap.label_cn }}</b> 的含义：{{ rgsnap.desc }}。判据（四条全满足 = <b>强</b>）：收盘 &gt; MA20 且 MA20 &gt; MA{{ rgsnap.ma_slow }} 且斜率 &gt; +{{ rgsnap.slope_min }}% 且 ADX &gt; {{ rgsnap.adx_min|int }} → <b>多头</b>；完全反向 → <b>空头</b>；只满足“收盘在 MA20 一侧 + 斜率同向” → <b>弱多/弱空</b>；其余 → <b>震荡</b>。参数可在<a href="/settings">设置页</a>改，这里的波段划分与仪表盘、飞书播报、<a href="/market">股票行情页</a>读同一份结果。</p>
 </div>
 {% endif %}
 

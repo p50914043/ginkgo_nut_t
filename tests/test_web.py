@@ -41,6 +41,13 @@ def strip_rules(html):
     return html[:a] + html[b + len('<!--RULES-END-->'):]
 
 
+def strip_nav(html):
+    """去掉全局 <nav> 导航：卖出预警是另一功能的入口，不算趋势交易口径泄漏"""
+    a, b = html.find('<nav>'), html.find('</nav>')
+    assert 0 <= a < b, '导航缺标记'
+    return html[:a] + html[b + len('</nav>'):]
+
+
 def mkdf(n=80, closes=None):
     closes = np.linspace(10, 16, n) if closes is None else np.asarray(closes, dtype=float)
     n = len(closes)
@@ -140,10 +147,16 @@ def test_chart_bundle_paints_regime_segments_and_flip_points():
     assert trend['n_strong_flips'] <= trend['n_flips']
 
 
-def test_chart_bundle_caps_bars_and_skips_missing_data():
-    """窗口只画最多 max_bars 根（更早的进统计不进图）；没有行情数据的标的不产出图表"""
-    b = bundle(SWING_DF, D[0], '2099-12-31')[0]
-    assert b['bars'] <= web.CHART_BARS
+def test_chart_bundle_draws_full_range_and_skips_missing_data():
+    """K 线画满所选 start~end 区间（不再截断到最近 N 根）；没有行情数据的标的不产出图表"""
+    long_df = mkdf(closes=list(np.linspace(10, 16, 500)))
+    ld = list(long_df['date'])
+    b = web._chart_bundle(STOCK, {'000001': long_df}, ld[0], ld[-1], CFGW)[0]
+    assert b['bars'] == 500                       # 旧 400 根上限已取消，区间内全部画进图
+    assert b['dates'][0] == ld[0] and b['dates'][-1] == ld[-1]   # 图范围与 start/end 一致
+    # 指定子区间：只画区间内的交易日（天数 = 该段日历日数）
+    sub = web._chart_bundle(STOCK, {'000001': long_df}, ld[100], ld[199], CFGW)[0]
+    assert sub['bars'] == 100 and sub['dates'] == ld[100:200]
     got = web._chart_bundle(STOCK, {}, D[0], D[-1], CFGW)
     assert got == []
     # 区间完全没数据也不硬出图
@@ -284,7 +297,11 @@ def test_settings_form_persists_t_trade_params(iso_cfg):
     assert abs(tt['pb_touch'] - 2.0) < 1e-9 and abs(tt['vol_shrink'] - 0.75) < 1e-9
     assert tt['enabled'] is False                     # 提交了提示区但没勾开关
     assert saved['regime']['ma_slow'] == 60           # 同一次提交里三态参数不丢
-    page = c.get('/settings').get_data(as_text=True)
+    # 提示层表单已去重到股价趋势页折叠区（_settings_judgment.html），直接渲染该 partial 验证回显
+    with web.app.test_request_context('/'):
+        cfgnow = cfg_mod.load_config()
+        page = web.render_template('_settings_judgment.html', cfg=cfgnow,
+                                   rg=cfgnow['regime'], tt=cfgnow['t_trade'])
     assert 'value="0.15"' in page and 'value="4.5"' in page and 'value="10"' in page
     assert 'name="buy_pctb"' in page and 'name="t_trade_enabled"' in page
     # 重新勾上开关 → 能存回 True
@@ -328,6 +345,8 @@ def test_market_page_get_has_only_recognition_controls(iso_cfg):
 
 
 def test_stocks_page_is_code_and_name_only(iso_cfg, tmp_path, monkeypatch):
+    """股票清单为趋势识别与卖出预警共用的唯一清单：除 code/name 外只多 type/index/enabled 三列（供卖出扫描），
+    旧交易字段（tier/base_shares 等）不得回归。"""
     path = tmp_path / 'stocklist.yaml'
     with open(path, 'w', encoding='utf-8') as f:
         yaml.safe_dump([{'code': '601318', 'name': '中国平安'},
@@ -338,11 +357,15 @@ def test_stocks_page_is_code_and_name_only(iso_cfg, tmp_path, monkeypatch):
     page = c.get('/stocks').get_data(as_text=True)
     for gone in ('tier', 'base_shares', 'base_cost', 'min_votes'):
         assert 'name="%s"' % gone not in page, gone
-    assert '买入' not in page and '卖出' not in page
-    # 改名与删除都落盘，且写回的清单只剩 code/name
+    assert '买入' not in strip_nav(page)
+    # 卖出预警复用主清单：估值口径/行业指数/纳入开关三列与整表提交都在
+    assert 'name="type_601318"' in page and 'name="index_601318"' in page
+    assert 'name="enabled_601318"' in page and 'value="update_all"' in page
+    # 改名与删除都落盘；load_stocks 规整出 type/index/enabled 字段
     c.post('/stocks', data={'action': 'rename', 'code': '601318', 'name': '平安'})
     c.post('/stocks', data={'action': 'del', 'code': '600741'})
-    assert cfg_mod.load_stocks() == [{'code': '601318', 'name': '平安'}]
+    assert cfg_mod.load_stocks() == [{'code': '601318', 'name': '平安', 'type': 'value',
+                                      'index': '', 'enabled': True}]
 
 
 # ---------- 模板渲染（含缺数据兜底） ----------
@@ -516,7 +539,7 @@ def test_market_template_renders_charts_and_stats():
 def test_rules_block_is_stated_with_current_params(iso_cfg):
     """需求：“判定规则与运行机制”要在页面标明，且写的就是当前生效参数（不能与引擎口径漂移）"""
     c = web.app.test_client()
-    for path in ('/settings', '/market'):
+    for path in ('/market',):        # v3.3.8：/settings 不再重复规则区，判定规则只在仪表盘/详情/行情页标明
         page = c.get(path).get_data(as_text=True)
         assert RULES_HEAD in page, path
         rg = CFGW['regime']
@@ -614,13 +637,20 @@ def test_nav_has_no_trading_pages():
     page = web.app.test_client().get('/settings').get_data(as_text=True)
     assert 'href="/market"' in page and 'href="/optimize"' not in page
     assert 'href="/backtest"' not in page
-    data_only = strip_rules(page)
+    data_only = page               # v3.3.8：/settings 已无规则区，整页即数据区，直接扫禁用词
     for word in FORBIDDEN:
         assert word not in data_only, word
-    # 提示层作为“纪律参数”回到了页面上（不再是旧一轮的“只报三态”）
-    assert '震荡段做T提示' in data_only and 'name="t_trade_present"' in page
+    # 设置页去重：只剩飞书通知，三态判定/做T提示已移到股价趋势页折叠区（不在 /settings 重复）
+    assert '飞书通知' in data_only
+    assert '震荡段做T提示' not in data_only and 'name="t_trade_present"' not in page
+    # 提示层作为“纪律参数”仍在判定表单上（现只渲染于 _settings_judgment.html）
+    with web.app.test_request_context('/'):
+        cfgnow = cfg_mod.load_config()
+        jpage = web.render_template('_settings_judgment.html', cfg=cfgnow,
+                                    rg=cfgnow['regime'], tt=cfgnow['t_trade'])
+    assert '震荡段做T提示' in jpage and 'name="t_trade_present"' in jpage
     for w in TIP_WORDS:
-        assert w in data_only, w
+        assert w in jpage, w
 
 
 @pytest.mark.parametrize('path', ['/settings', '/stocks', '/market', '/doc'])

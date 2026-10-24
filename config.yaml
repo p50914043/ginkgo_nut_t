@@ -1,24 +1,39 @@
-regime:                     # 三态行情判定（唯一判定层，只用均线 + ADX）：多头 / 空头 / 震荡
-  ma_fast: 5                # 快线：只在图上辅助参考，不参与判据
-  ma_slow: 60               # 慢线：中期结构分界（MA20 在其上=多头结构，在其下=空头结构）
-  slope_min: 0.3            # MA20 的 5 日斜率阈值%：达不到就不算“强”趋势
-  confirm_days: 3           # 滞回：新状态连续成立 N 个交易日才切换
-  adx_min: 25.0             # ADX(14) 动能门槛：超过才算强多/强空，否则降级为弱多/弱空
-  spike_days: 3             # 毛刺过滤：不足 N 日的片段并入相邻主状态，不成波段
-# 提示层（不改变三态判定）：只在震荡段给做T纪律提示，多头段给回踩介入提示
+regime:
+  ma_fast: 5
+  ma_slow: 60
+  slope_min: 0.3
+  confirm_days: 3
+  adx_min: 25.0
+  spike_days: 3
 t_trade:
   enabled: true
-  buy_pctb: 0.10            # 区间下沿：%B ≤ 此值→买入提示
-  sell_pctb: 0.90           # 区间上沿：持仓中 %B ≥ 此值→卖出提示
-  stop_pct: 5.0             # 硬止损：自提示买入当日收盘跌这么多就走
-  max_hold: 15              # 最长持有交易日数，超了提示离场
-  pb_touch: 1.5             # 多头回踩容差%：最低价距 MA20 这么近算“踩到”
-  vol_shrink: 0.8           # 缩量：当日量比(20) 低于此倍数才算缩
-# 盘后自动运行：工作日到点自动「更新数据→扫描→飞书播报」一次，当日只跑一次
+  buy_pctb: 0.1
+  sell_pctb: 0.9
+  stop_pct: 5.0
+  max_hold: 15
+  pb_touch: 1.5
+  vol_shrink: 0.8
+sell_notify:
+  enabled: true
+  a_yellow: 70.0
+  a_red: 80.0
+  a_years_pe: 5
+  a_years_pb: 10
+  b_ocf_ratio: 0.5
+  b_debt_up: 10.0
+  b_growth_gap: 30.0
+  b_roe_years: 3
+  b_div_drop: 30.0
+  b_red_groups: 3
+  c_dd_pct: 20.0
+  c_dd_days: 250
+  c_warn_days: 30
+  c_warn_peers: 2
+  d_on: true
+  bt_years: 3
 auto_run_enabled: true
 auto_run_time: '15:35'
-auto_run_retry: false       # 判定为非交易日后，本轮是否继续重试
-# 通知通道: auto(优先应用机器人) / app_bot / webhook
+auto_run_retry: false
 notify_channel: auto
 feishu_webhook: https://open.feishu.cn/open-apis/bot/v2/hook/6d761169-3f73-4de7-bcaf-31880323f7b6
 feishu_webhook_secret: wKWy5hVXC7TEK0wrS5R7r
@@ -26,4 +41,4 @@ feishu_app_id: ''
 feishu_app_secret: ''
 feishu_receive_id: ''
 feishu_receive_id_type: open_id
-data_start: '2015-01-01'    # 本地行情起始日期（首次建库用，界面只读）
+data_start: '2015-01-01'
